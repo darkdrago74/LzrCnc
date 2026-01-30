@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Save, Upload, Download, RefreshCw, LayoutTemplate, Box, ArrowLeftRight, Eye } from 'lucide-react';
+import { Save, Upload, Download, RefreshCw, LayoutTemplate, Box, ArrowLeftRight, Eye, Unlock, Settings as SettingsIcon } from 'lucide-react';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls, PerspectiveCamera, Html } from '@react-three/drei';
 import * as THREE from 'three';
@@ -173,10 +173,22 @@ export default function MachineSettingsPanel({ status, laserBeamEnabled, setLase
     const [settings, setSettings] = useState<MachineSettings | null>(null);
     const [loading, setLoading] = useState(false);
     const [saving, setSaving] = useState(false);
+    const [activeTab, setActiveTab] = useState<'app' | 'hardware'>('app');
+
+    // Hardware Params State
+    const [hwParams, setHwParams] = useState<any>({});
+    const [syncingGrbl, setSyncingGrbl] = useState(false);
 
     useEffect(() => {
         fetchSettings();
     }, []);
+
+    // Load initial HW params from status if available
+    useEffect(() => {
+        if (status?.grblSettings) {
+            setHwParams((prev: any) => ({ ...prev, ...status.grblSettings }));
+        }
+    }, [status?.grblSettings]);
 
     // Emit settings changes to parent for live preview
     useEffect(() => {
@@ -260,211 +272,370 @@ export default function MachineSettingsPanel({ status, laserBeamEnabled, setLase
         }
     };
 
-    // Placeholder for Import functions
+    const sendGcode = async (cmd: string) => {
+        try {
+            await fetch(`${API_URL}/command`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ gcode: cmd })
+            });
+        } catch (e) {
+            console.error("Command failed", e);
+        }
+    }
+
+    const handleImportGrbl = async () => {
+        setSyncingGrbl(true);
+        // 1. Request Settings
+        await sendGcode('$$');
+
+        // 2. Wait a moment for status to update (naive approach, better would be to wait for specific event)
+        setTimeout(() => {
+            if (status.grblSettings) {
+                const maxX = status.grblSettings['130'] || 300;
+                const maxY = status.grblSettings['131'] || 200;
+                const maxZ = status.grblSettings['132'] || 50;
+
+                if (settings) {
+                    const newSettings = { ...settings };
+                    newSettings.workbench.width = maxX;
+                    newSettings.workbench.height = maxY;
+                    newSettings.workbench.depth = maxZ;
+                    newSettings.axes.x.max = maxX;
+                    newSettings.axes.y.max = maxY;
+                    newSettings.axes.z.max = maxZ;
+                    setSettings(newSettings);
+                    alert(`Imported Dimensions: ${maxX}x${maxY}x${maxZ}`);
+                }
+            } else {
+                alert("No GRBL settings received. Is machine connected?");
+            }
+            setSyncingGrbl(false);
+        }, 1500);
+    };
+
     const handleImportKlipper = () => alert("Import from Klipper - Coming Soon");
-    const handleImportGrbl = () => alert("Import from GRBL - Coming Soon");
+
+    const updateHwParam = (id: string, val: string) => {
+        setHwParams({ ...hwParams, [id]: val });
+    }
+
+    const uploadHwParam = async (id: string) => {
+        const val = hwParams[id];
+        if (val === undefined) return;
+        await sendGcode(`$${id}=${val}`);
+        // Refresh
+        setTimeout(() => sendGcode('$$'), 500);
+    }
 
     if (loading || !settings) return <div className="p-4 text-gray-400">Loading settings...</div>;
 
     return (
         <div className="p-4 space-y-6 text-sm">
-            <div className="flex justify-between items-center mb-4">
-                <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                    <LayoutTemplate size={20} className="text-cyan-400" />
-                    Machine Setup
-                </h3>
+
+            {/* New Tabs Header */}
+            <div className="flex space-x-2 border-b border-white/10 pb-2 mb-4">
                 <button
-                    onClick={handleSave}
-                    disabled={saving}
-                    className="bg-cyan-600 hover:bg-cyan-500 text-white px-3 py-1 rounded flex items-center gap-2 disabled:opacity-50"
+                    onClick={() => setActiveTab('app')}
+                    className={`px-3 py-1 rounded text-sm font-medium transition-colors ${activeTab === 'app' ? 'bg-cyan-600 text-white' : 'text-gray-400 hover:text-white'}`}
                 >
-                    <Save size={16} />
-                    {saving ? 'Saving...' : 'Save'}
+                    App Settings
+                </button>
+                <button
+                    onClick={() => setActiveTab('hardware')}
+                    className={`px-3 py-1 rounded text-sm font-medium transition-colors ${activeTab === 'hardware' ? 'bg-orange-600 text-white' : 'text-gray-400 hover:text-white'}`}
+                >
+                    Hardware Parameters
                 </button>
             </div>
 
-            {/* Workbench Dimensions */}
-            <section className="bg-slate-800/50 p-4 rounded-lg border border-white/10 space-y-4">
-                <h4 className="text-md font-semibold text-gray-200 flex items-center gap-2">
-                    <Box size={16} /> Workbench Area
-                </h4>
-                <div className="grid grid-cols-3 gap-2">
-                    <div>
-                        <label className="block text-gray-400 text-xs mb-1">Width (X)</label>
-                        <div className="relative">
-                            <input
-                                type="number"
-                                value={settings.workbench.width}
-                                onChange={e => updateWorkbench('width', parseFloat(e.target.value))}
-                                className="w-full bg-slate-900 border border-white/10 rounded px-2 py-1 text-white text-right pr-6"
-                            />
-                            <span className="absolute right-2 top-1 text-gray-500 text-xs">mm</span>
-                        </div>
-                    </div>
-                    <div>
-                        <label className="block text-gray-400 text-xs mb-1">Height (Y)</label>
-                        <div className="relative">
-                            <input
-                                type="number"
-                                value={settings.workbench.height}
-                                onChange={e => updateWorkbench('height', parseFloat(e.target.value))}
-                                className="w-full bg-slate-900 border border-white/10 rounded px-2 py-1 text-white text-right pr-6"
-                            />
-                            <span className="absolute right-2 top-1 text-gray-500 text-xs">mm</span>
-                        </div>
-                    </div>
-                    <div>
-                        <label className="block text-gray-400 text-xs mb-1">Depth (Z)</label>
-                        <div className="relative">
-                            <input
-                                type="number"
-                                value={settings.workbench.depth}
-                                onChange={e => updateWorkbench('depth', parseFloat(e.target.value))}
-                                className="w-full bg-slate-900 border border-white/10 rounded px-2 py-1 text-white text-right pr-6"
-                            />
-                            <span className="absolute right-2 top-1 text-gray-500 text-xs">mm</span>
-                        </div>
-                    </div>
-                </div>
-                <div className="flex items-center justify-between mt-2">
-                    <span className="text-gray-400">Show in Visualizer</span>
-                    <input
-                        type="checkbox"
-                        checked={settings.workbench.showWorkbench}
-                        onChange={e => updateWorkbench('showWorkbench', e.target.checked)}
-                        className="accent-cyan-500"
-                    />
-                </div>
-            </section>
 
-            {/* Axis Configuration & Visualizer */}
-            <section className="bg-slate-800/50 p-4 rounded-lg border border-white/10 space-y-4">
-                <h4 className="text-md font-semibold text-gray-200 flex items-center gap-2">
-                    <MoveIcon /> Axis Configuration
-                </h4>
-
-                {/* Visualizer Mockup (Simple SVG) */}
-                <div className="w-full aspect-video bg-slate-900 rounded border border-white/5 relative flex items-center justify-center overflow-hidden">
-                    <AxisVisualizer settings={settings} onUpdateOrigin={(o) => updateWorkbench('origin', o)} updateAxis={updateAxis} />
-                </div>
-
-                <div className="space-y-2">
-                    {/* Header */}
-                    <div className="flex items-center justify-between text-xs text-gray-500 mb-2 border-b border-white/5 pb-1">
-                        <span>Axis</span>
-                        <span>Offset from Marker (mm)</span>
-                        <span>Direction</span>
+            {activeTab === 'app' && (
+                <>
+                    <div className="flex justify-between items-center mb-4">
+                        <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                            <LayoutTemplate size={20} className="text-cyan-400" />
+                            Machine Setup
+                        </h3>
+                        <button
+                            onClick={handleSave}
+                            disabled={saving}
+                            className="bg-cyan-600 hover:bg-cyan-500 text-white px-3 py-1 rounded flex items-center gap-2 disabled:opacity-50"
+                        >
+                            <Save size={16} />
+                            {saving ? 'Saving...' : 'Save'}
+                        </button>
                     </div>
 
-                    {/* X Axis */}
-                    <div className="flex items-center justify-between bg-white/5 p-2 rounded">
-                        <div className="flex items-center gap-2">
-                            <span className="text-red-500 font-bold w-4">X</span>
-                            <input
-                                type="number"
-                                value={settings.axes.x.offset || 0}
-                                onChange={e => updateAxis('x', 'offset', parseFloat(e.target.value))}
-                                className="w-16 bg-transparent border-b border-white/20 text-white text-xs text-center focus:border-cyan-500 outline-none"
-                                placeholder="0"
-                            />
-                        </div>
-                        <label className="text-xs text-gray-400 flex items-center gap-2 cursor-pointer hover:text-white" title="Invert Positive Direction">
-                            <input
-                                type="checkbox"
-                                checked={settings.axes.x.reversed}
-                                onChange={e => updateAxis('x', 'reversed', e.target.checked)}
-                                className="accent-red-500"
-                            />
-                            Reverse +Dir
-                        </label>
-                    </div>
-
-                    {/* Y Axis */}
-                    <div className="flex items-center justify-between bg-white/5 p-2 rounded">
-                        <div className="flex items-center gap-2">
-                            <span className="text-green-500 font-bold w-4">Y</span>
-                            <input
-                                type="number"
-                                value={settings.axes.y.offset || 0}
-                                onChange={e => updateAxis('y', 'offset', parseFloat(e.target.value))}
-                                className="w-16 bg-transparent border-b border-white/20 text-white text-xs text-center focus:border-cyan-500 outline-none"
-                                placeholder="0"
-                            />
-                        </div>
-                        <label className="text-xs text-gray-400 flex items-center gap-2 cursor-pointer hover:text-white" title="Invert Positive Direction">
-                            <input
-                                type="checkbox"
-                                checked={settings.axes.y.reversed}
-                                onChange={e => updateAxis('y', 'reversed', e.target.checked)}
-                                className="accent-green-500"
-                            />
-                            Reverse +Dir
-                        </label>
-                    </div>
-
-                    {/* Z Axis */}
-                    <div className="flex items-center justify-between bg-white/5 p-2 rounded">
-                        <div className="flex items-center gap-2">
-                            <span className="text-blue-500 font-bold w-4">Z</span>
-                            <div className="flex items-center gap-2">
-                                <span className="text-gray-400 text-xs w-12">{settings.axes.z.max}mm</span>
-                                <label className="text-[10px] text-gray-500 flex items-center gap-1">
+                    {/* Workbench Dimensions */}
+                    <section className="bg-slate-800/50 p-4 rounded-lg border border-white/10 space-y-4">
+                        <h4 className="text-md font-semibold text-gray-200 flex items-center gap-2">
+                            <Box size={16} /> Workbench Area
+                        </h4>
+                        <div className="grid grid-cols-3 gap-2">
+                            <div>
+                                <label className="block text-gray-400 text-xs mb-1">Width (X)</label>
+                                <div className="relative">
                                     <input
-                                        type="checkbox"
-                                        checked={settings.axes.z.visible}
-                                        onChange={e => updateAxis('z', 'visible', e.target.checked)}
-                                        className="accent-gray-500"
+                                        type="number"
+                                        value={settings.workbench.width}
+                                        onChange={e => updateWorkbench('width', parseFloat(e.target.value))}
+                                        className="w-full bg-slate-900 border border-white/10 rounded px-2 py-1 text-white text-right pr-6"
                                     />
-                                    Enable
-                                </label>
+                                    <span className="absolute right-2 top-1 text-gray-500 text-xs">mm</span>
+                                </div>
+                            </div>
+                            <div>
+                                <label className="block text-gray-400 text-xs mb-1">Height (Y)</label>
+                                <div className="relative">
+                                    <input
+                                        type="number"
+                                        value={settings.workbench.height}
+                                        onChange={e => updateWorkbench('height', parseFloat(e.target.value))}
+                                        className="w-full bg-slate-900 border border-white/10 rounded px-2 py-1 text-white text-right pr-6"
+                                    />
+                                    <span className="absolute right-2 top-1 text-gray-500 text-xs">mm</span>
+                                </div>
+                            </div>
+                            <div>
+                                <label className="block text-gray-400 text-xs mb-1">Depth (Z)</label>
+                                <div className="relative">
+                                    <input
+                                        type="number"
+                                        value={settings.workbench.depth}
+                                        onChange={e => updateWorkbench('depth', parseFloat(e.target.value))}
+                                        className="w-full bg-slate-900 border border-white/10 rounded px-2 py-1 text-white text-right pr-6"
+                                    />
+                                    <span className="absolute right-2 top-1 text-gray-500 text-xs">mm</span>
+                                </div>
                             </div>
                         </div>
-                        {settings.axes.z.visible && (
-                            <div className="flex items-center gap-4">
-                                <input
-                                    type="number"
-                                    value={settings.axes.z.offset || 0}
-                                    onChange={e => updateAxis('z', 'offset', parseFloat(e.target.value))}
-                                    className="w-12 bg-transparent border-b border-white/20 text-white text-xs text-center focus:border-cyan-500 outline-none"
-                                    placeholder="Off"
-                                />
+                        <div className="flex items-center justify-between mt-2">
+                            <span className="text-gray-400">Show in Visualizer</span>
+                            <input
+                                type="checkbox"
+                                checked={settings.workbench.showWorkbench}
+                                onChange={e => updateWorkbench('showWorkbench', e.target.checked)}
+                                className="accent-cyan-500"
+                            />
+                        </div>
+                    </section>
+
+                    {/* Import / Export - moved up for logical flow */}
+                    <section className="bg-slate-800/50 p-4 rounded-lg border border-white/10 space-y-4">
+                        <h4 className="text-md font-semibold text-gray-200">Data Synchronization</h4>
+                        <div className="flex gap-2">
+                            <button
+                                onClick={handleImportGrbl}
+                                disabled={syncingGrbl}
+                                className="flex-1 bg-white/5 hover:bg-white/10 p-2 rounded text-xs flex flex-col items-center gap-1 disabled:opacity-50"
+                            >
+                                <RefreshCw size={16} className={`text-blue-400 ${syncingGrbl ? 'animate-spin' : ''}`} />
+                                <span>GRBL Import (Sync Size)</span>
+                            </button>
+                            <button onClick={handleImportKlipper} className="flex-1 bg-white/5 hover:bg-white/10 p-2 rounded text-xs flex flex-col items-center gap-1">
+                                <RefreshCw size={16} className="text-orange-400" />
+                                <span>Klipper Import</span>
+                            </button>
+                        </div>
+                    </section>
+
+                    {/* Axis Configuration & Visualizer */}
+                    <section className="bg-slate-800/50 p-4 rounded-lg border border-white/10 space-y-4">
+                        <h4 className="text-md font-semibold text-gray-200 flex items-center gap-2">
+                            <MoveIcon /> Axis Configuration
+                        </h4>
+
+                        {/* Visualizer Mockup (Simple SVG) */}
+                        <div className="w-full aspect-video bg-slate-900 rounded border border-white/5 relative flex items-center justify-center overflow-hidden">
+                            <AxisVisualizer settings={settings} onUpdateOrigin={(o) => updateWorkbench('origin', o)} updateAxis={updateAxis} />
+                        </div>
+
+                        <div className="space-y-2">
+                            {/* Header */}
+                            <div className="flex items-center justify-between text-xs text-gray-500 mb-2 border-b border-white/5 pb-1">
+                                <span>Axis</span>
+                                <span>Offset from Marker (mm)</span>
+                                <span>Direction</span>
+                            </div>
+
+                            {/* X Axis */}
+                            <div className="flex items-center justify-between bg-white/5 p-2 rounded">
+                                <div className="flex items-center gap-2">
+                                    <span className="text-red-500 font-bold w-4">X</span>
+                                    <input
+                                        type="number"
+                                        value={settings.axes.x.offset || 0}
+                                        onChange={e => updateAxis('x', 'offset', parseFloat(e.target.value))}
+                                        className="w-16 bg-transparent border-b border-white/20 text-white text-xs text-center focus:border-cyan-500 outline-none"
+                                        placeholder="0"
+                                    />
+                                </div>
                                 <label className="text-xs text-gray-400 flex items-center gap-2 cursor-pointer hover:text-white" title="Invert Positive Direction">
                                     <input
                                         type="checkbox"
-                                        checked={settings.axes.z.reversed}
-                                        onChange={e => updateAxis('z', 'reversed', e.target.checked)}
-                                        className="accent-blue-500"
+                                        checked={settings.axes.x.reversed}
+                                        onChange={e => updateAxis('x', 'reversed', e.target.checked)}
+                                        className="accent-red-500"
                                     />
                                     Reverse +Dir
                                 </label>
                             </div>
-                        )}
+
+                            {/* Y Axis */}
+                            <div className="flex items-center justify-between bg-white/5 p-2 rounded">
+                                <div className="flex items-center gap-2">
+                                    <span className="text-green-500 font-bold w-4">Y</span>
+                                    <input
+                                        type="number"
+                                        value={settings.axes.y.offset || 0}
+                                        onChange={e => updateAxis('y', 'offset', parseFloat(e.target.value))}
+                                        className="w-16 bg-transparent border-b border-white/20 text-white text-xs text-center focus:border-cyan-500 outline-none"
+                                        placeholder="0"
+                                    />
+                                </div>
+                                <label className="text-xs text-gray-400 flex items-center gap-2 cursor-pointer hover:text-white" title="Invert Positive Direction">
+                                    <input
+                                        type="checkbox"
+                                        checked={settings.axes.y.reversed}
+                                        onChange={e => updateAxis('y', 'reversed', e.target.checked)}
+                                        className="accent-green-500"
+                                    />
+                                    Reverse +Dir
+                                </label>
+                            </div>
+
+                            {/* Z Axis */}
+                            <div className="flex items-center justify-between bg-white/5 p-2 rounded">
+                                <div className="flex items-center gap-2">
+                                    <span className="text-blue-500 font-bold w-4">Z</span>
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-gray-400 text-xs w-12">{settings.axes.z.max}mm</span>
+                                        <label className="text-[10px] text-gray-500 flex items-center gap-1">
+                                            <input
+                                                type="checkbox"
+                                                checked={settings.axes.z.visible}
+                                                onChange={e => updateAxis('z', 'visible', e.target.checked)}
+                                                className="accent-gray-500"
+                                            />
+                                            Enable
+                                        </label>
+                                    </div>
+                                </div>
+                                {settings.axes.z.visible && (
+                                    <div className="flex items-center gap-4">
+                                        <input
+                                            type="number"
+                                            value={settings.axes.z.offset || 0}
+                                            onChange={e => updateAxis('z', 'offset', parseFloat(e.target.value))}
+                                            className="w-12 bg-transparent border-b border-white/20 text-white text-xs text-center focus:border-cyan-500 outline-none"
+                                            placeholder="Off"
+                                        />
+                                        <label className="text-xs text-gray-400 flex items-center gap-2 cursor-pointer hover:text-white" title="Invert Positive Direction">
+                                            <input
+                                                type="checkbox"
+                                                checked={settings.axes.z.reversed}
+                                                onChange={e => updateAxis('z', 'reversed', e.target.checked)}
+                                                className="accent-blue-500"
+                                            />
+                                            Reverse +Dir
+                                        </label>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </section>
+                </>
+            )}
+
+            {activeTab === 'hardware' && (
+                <div className="space-y-4">
+                    <p className="text-xs text-orange-400 bg-orange-900/20 p-2 rounded border border-orange-900/50">
+                        ⚠ Changes in this tab are written directly to the machine firmware (EEPROM). Proceed with caution.
+                    </p>
+
+                    {/* Machine Controls - Homing, Unlock */}
+                    <div className="grid grid-cols-2 gap-2">
+                        <button onClick={() => sendGcode('$H')} className="bg-blue-600 hover:bg-blue-500 text-white p-3 rounded flex items-center justify-center gap-2">
+                            <RefreshCw size={18} /> Home Machine ($H)
+                        </button>
+                        <button onClick={() => sendGcode('$X')} className="bg-red-600 hover:bg-red-500 text-white p-3 rounded flex items-center justify-center gap-2">
+                            <Unlock size={18} /> Unlock / Reset ($X)
+                        </button>
+                    </div>
+
+                    <div className="bg-slate-800/50 p-4 rounded-lg border border-white/10">
+                        <div className="flex justify-between items-center mb-4">
+                            <h4 className="text-md font-semibold text-gray-200 flex items-center gap-2">
+                                <SettingsIcon size={16} /> GRBL Parameters
+                            </h4>
+                            <button onClick={() => sendGcode('$$')} className="text-xs text-cyan-400 hover:underline">
+                                Refresh ($$)
+                            </button>
+                        </div>
+
+                        <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2">
+                            {/* Max Rate */}
+                            <div className="space-y-2">
+                                <h5 className="text-xs font-bold text-gray-500 uppercase">Max Rate (mm/min)</h5>
+                                {[110, 111, 112].map((id, idx) => (
+                                    <div key={id} className="flex items-center justify-between text-xs bg-white/5 p-2 rounded">
+                                        <span className="text-gray-300 w-24">{'XYZ'[idx]} (${id})</span>
+                                        <input
+                                            type="number"
+                                            value={hwParams[id] ?? ''}
+                                            onChange={(e) => updateHwParam(id.toString(), e.target.value)}
+                                            className="w-20 bg-slate-900 border border-white/10 rounded px-2 py-1 text-right text-white"
+                                        />
+                                        <button onClick={() => uploadHwParam(id.toString())} className="text-cyan-400 hover:text-cyan-300 ml-2">
+                                            <Upload size={14} />
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
+
+                            {/* Acceleration */}
+                            <div className="space-y-2">
+                                <h5 className="text-xs font-bold text-gray-500 uppercase">Acceleration (mm/sec²)</h5>
+                                {[120, 121, 122].map((id, idx) => (
+                                    <div key={id} className="flex items-center justify-between text-xs bg-white/5 p-2 rounded">
+                                        <span className="text-gray-300 w-24">{'XYZ'[idx]} (${id})</span>
+                                        <input
+                                            type="number"
+                                            value={hwParams[id] ?? ''}
+                                            onChange={(e) => updateHwParam(id.toString(), e.target.value)}
+                                            className="w-20 bg-slate-900 border border-white/10 rounded px-2 py-1 text-right text-white"
+                                        />
+                                        <button onClick={() => uploadHwParam(id.toString())} className="text-cyan-400 hover:text-cyan-300 ml-2">
+                                            <Upload size={14} />
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
+
+                            {/* Max Travel */}
+                            <div className="space-y-2">
+                                <h5 className="text-xs font-bold text-gray-500 uppercase">Max Travel (mm)</h5>
+                                {[130, 131, 132].map((id, idx) => (
+                                    <div key={id} className="flex items-center justify-between text-xs bg-white/5 p-2 rounded">
+                                        <span className="text-gray-300 w-24">{'XYZ'[idx]} (${id})</span>
+                                        <input
+                                            type="number"
+                                            value={hwParams[id] ?? ''}
+                                            onChange={(e) => updateHwParam(id.toString(), e.target.value)}
+                                            className="w-20 bg-slate-900 border border-white/10 rounded px-2 py-1 text-right text-white"
+                                        />
+                                        <button onClick={() => uploadHwParam(id.toString())} className="text-cyan-400 hover:text-cyan-300 ml-2">
+                                            <Upload size={14} />
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+
                     </div>
                 </div>
-            </section>
-
-            {/* Import / Export */}
-            <section className="bg-slate-800/50 p-4 rounded-lg border border-white/10 space-y-4">
-                <h4 className="text-md font-semibold text-gray-200">Data Management</h4>
-                <div className="flex gap-2">
-                    <button onClick={handleImportKlipper} className="flex-1 bg-white/5 hover:bg-white/10 p-2 rounded text-xs flex flex-col items-center gap-1">
-                        <RefreshCw size={16} className="text-orange-400" />
-                        <span>Klipper Import</span>
-                    </button>
-                    <button onClick={handleImportGrbl} className="flex-1 bg-white/5 hover:bg-white/10 p-2 rounded text-xs flex flex-col items-center gap-1">
-                        <RefreshCw size={16} className="text-blue-400" />
-                        <span>GRBL Import</span>
-                    </button>
-                </div>
-                <div className="flex gap-2 pt-2 border-t border-white/5">
-                    <button className="flex-1 text-gray-400 hover:text-white text-xs flex items-center justify-center gap-1">
-                        <Download size={14} /> Export JSON
-                    </button>
-                    <button className="flex-1 text-gray-400 hover:text-white text-xs flex items-center justify-center gap-1">
-                        <Upload size={14} /> Import JSON
-                    </button>
-                </div>
-            </section>
+            )}
 
 
             {/* Visualizer Settings */}

@@ -1,7 +1,7 @@
 {
   "workbench": {
     "width": 300,
-    "height": 200,
+    "height": 300,
     "depth": 50,
     "origin": "top-right",
     "showWorkbench": true
@@ -12,7 +12,7 @@
       "min": 0,
       "max": 300,
       "direction": 1,
-      "reversed": false
+      "reversed": true
     },
     "y": {
       "visible": true,

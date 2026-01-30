@@ -17,6 +17,7 @@ export interface MachineStatus {
         z: { min: number, max: number };
     };
     macros?: string[];
+    grblSettings?: Record<string, string | number>;
 }
 
 export interface ProbeOptions {

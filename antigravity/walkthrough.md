@@ -1,47 +1,30 @@
-# Walkthrough: Uninstaller & Validation
-
-## Summary
-I have implemented a robust infrastructure for managing the `RevivedLaserweb4` installation, satisfying the requirement for a "clean slate" validation cycle while protecting critical system components.
-
-## Changes Implemented
-
-### 1. Robust Uninstaller (`uninstall.sh`)
-- **Dual Modes**: 
-    - `sudo ./uninstall.sh --clean` (Default): Removes only app files, keeping dependencies.
-    - `sudo ./uninstall.sh --all`: Removes app files AND system dependencies.
-- **Safety Mechanism**: Implemented a **Critical Package Safelist** (`sudo`, `git`, `python3`, `udev`, `nodejs`, `npm`) to prevent `apt-get remove` from bricking the system even if these packages are listed in `requirement-simple.txt`.
-- **Process Cleanup**: Automatically kills any running server processes on port 3000 before uninstalling.
-
-### 2. Smart Installer (`install.sh`)
-- **Node.js Preservation**: Added logic to check if a valid Node.js version (>=20) is already present. If found, it **skips** the destructive `apt-get install nodejs` step, preserving the user's development environment.
-- **Idempotency**: The script can now be run multiple times safeley.
-
-### 3. Validation Script (`validate.sh`)
-- **Workflow**: 
-  1. `uninstall.sh --all` (Clean slate)
-  2. `install.sh` (Reinstall)
-  3. `npm start` (Background)
-  4. Health Check (`curl localhost:3000/ping`) with **Robust Retry Loop** (30 retries).
-- **Status**: The script logic is verified. During the automated test run, the `npm install` phase encountered a **Network Timeout**, preventing the final ping check, but the uninstallation and safety checks performed correctly.
-
-## Verification Results
-
-### Uninstaller Safety Check
-```bash
-# Output from validation run
-WARNING: You have selected --all mode.
-SKIP: python3 is a critical system package. Keeping it.
-SKIP: udev is a critical system package. Keeping it.
-```
-**Result**: ✅ Critical packages were correctly protected.
-
-### Installation Logic
-```bash
-# Output from validation run
-Node.js 22.21.1 already installed. Skipping apt install of nodejs.
-```
-**Result**: ✅ Existing Node environment was preserved.
-
-## Next Steps
-- Ensure stable internet connection and run `sudo ./validate.sh` manually to confirm end-to-end success.
-- Proceed to Phase 1 (CAM Logic).
+# Walkthrough - GRBL Settings Sync & Control
+## Goal
+Implement two-way synchronization between the App and the GRBL hardware, along with essential control functions.
+## Changes
+### 1. Backend (`Server`)
+- **Enhanced Status**: `MachineStatus` now carries a `grblSettings` dictionary containing all `$N=V` parameters.
+- **GrblController**: Updated to parse every setting line (e.g., `$110=5000`) and store it in status.
+### 2. Frontend (`Client`)
+- **GRBL Import**: Added a button to "Sync Size" which reads `$130`, `$131`, `$132` from the board and updates the Workbench dimensions in the App.
+- **Hardware Parameters Tab**: A new "Expert" tab that allows viewing and modifying:
+    - **Max Rates** (`$110`, `$111`, `$112`)
+    - **Accelerations** (`$120`, `$121`, `$122`)
+    - **Max Travel** (`$130`, `$131`, `$132`)
+- **Control Actions**: Added dedicated buttons for:
+    - **Home Machine**: Sends `$H`
+    - **Unlock / Reset**: Sends `$X`
+## Verification
+1.  **Open Settings**: Navigate to the Settings Panel.
+2.  **Test Import**:
+    -   Ensure machine is connected.
+    -   Click "GRBL Import".
+    -   Observe Workbench dimensions updating to match firmware limits (e.g., 302x326x65).
+3.  **Test Hardware Tab**:
+    -   Switch to "Hardware Parameters".
+    -   Verify values are populated.
+    -   Edit a value (e.g., Change X Max Rate to 5500) and click the Upload icon.
+    -   Click "Refresh ($$)" to confirm validity.
+4.  **Test Controls**:
+    -   Click "Unlock ($X)" -> Should see "Caution: Unlocked" in logs/console.
+    -   Click "Home ($H)" -> Machine should begin homing cycle.

@@ -46,6 +46,13 @@ lzrcnc
 -   **Smart Startup**: This script checks if port `3000` is free. If a frozen/zombie instance is blocking it, it will automatically clean it up and start a fresh instance.
 -   **Access**: Open your browser to `http://localhost:3000` or `http://<your-pi-ip>:3000`.
 
+### Hardware Connection
+**GRBL**:
+- Connect your board via USB.
+- In **Machine Settings**, select "GRBL Import" to auto-configure your workspace dimensions.
+- Use the **Hardware Parameters** tab to fine-tune your machine's speeds, accelerations, and travel limits directly on the EEPROM.
+- **Controls**: Homing (`$H`) and Unlock (`$X`) are available in the setup tab.
+
 ### Manual Start (Dev)
 ```bash
 npm start

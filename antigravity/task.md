@@ -1,6 +1,9 @@
-# Project Tasks: RevivedLaserweb4
+# Project Tasks: LzrCnc
 
-# Project Tasks: RevivedLaserweb4
+## Critical Rules
+- **NEVER use `pkill node`**. It causes crashes. Always prefer gentle shutdowns or ask the user.
+
+# Project Tasks: LzrCnc
 
 ## Phase 0: Infrastructure & Validation (Enhanced QC)
 - [x] **Robust Uninstaller (`uninstall.sh`)**
@@ -25,7 +28,9 @@
 - [x] **Refinement Phase 3**
     - [x] Visualizer: Beam Makeover (White Core/Blue Glow).
     - [x] Visualizer: Particle Reduction (20 count, slow).
+    - [x] **Settings Visualizer**: 3D Canvas, Opaque Bed, Corner Origins, Thicker Arrows, Static Direction logic.
     - [x] Visualizer: Denser Outer Grid (5cm).
+    - [x] **Endstops**: Configuration UI & 3D Visualization.
 - [x] **Final Polish & QA**
     - [x] Visualizer: Single Beam (Simplify).
     - [x] Docs: Update README (lzrcnc, install).
@@ -57,6 +62,14 @@
     - [ ] Terminal, Macros, Z-Probe UI.
 
 ## Phase 3: Hardware Refinement
+- [x] **Hardware Tests**
+    - [x] Detect `/dev/ttyUSB0`.
+    - [x] Verify GRBL connection via UI (API Validated).
+    - [x] Verify `$$` settings retrieval.
+- [x] **GRBL Integration**
+    - [x] **Import Feature**: Sync dimensions from board.
+    - [x] **Expert Tab**: Edit `$110`-`$132` parameters.
+    - [x] **Controls**: Homing ($H) and Unlock ($X).
 - [ ] **Klipper Integration**
     - [ ] Verify `KlipperController`.
     - [ ] Parse `printer.cfg`.

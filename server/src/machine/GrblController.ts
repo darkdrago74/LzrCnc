@@ -172,6 +172,13 @@ export class GrblController extends EventEmitter implements MachineInterface {
                 const id = parseInt(match[1]);
                 const val = parseFloat(match[2]);
 
+                // Initialize if missing
+                if (!this.status.grblSettings) {
+                    this.status.grblSettings = {};
+                }
+                // Store raw value
+                this.status.grblSettings[id] = val;
+
                 if (!this.status.limits) {
                     this.status.limits = {
                         x: { min: 0, max: 200 },
