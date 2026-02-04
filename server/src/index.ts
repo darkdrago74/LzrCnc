@@ -8,6 +8,8 @@ import { MockController } from './machine/MockController.js';
 import camRoutes from './routes/cam.js';
 import materialRoutes from './routes/material.js'; // Assuming new material routes
 import settingsRoutes from './routes/settings.js'; // Import Settings Routes
+import toolRoutes from './routes/tools.js';
+import cncRoutes from './routes/cnc.js';
 import { MaterialService } from './services/MaterialService.js'; // Added import for MaterialService
 import { SettingsService } from './services/SettingsService.js'; // Import SettingsService
 import { CamService } from './cam/CamService.js'; // Corrected import path
@@ -47,6 +49,8 @@ const settingsService = new SettingsService(dataDir); // Instantiate SettingsSer
 server.register(camRoutes, { camService });
 server.register(materialRoutes, { materialService });
 server.register(settingsRoutes, { settingsService }); // Register Settings Routes
+server.register(toolRoutes);
+server.register(cncRoutes);
 
 // SPA Fallback: serve index.html for unknown routes (React Router support)
 server.setNotFoundHandler((req, reply) => {

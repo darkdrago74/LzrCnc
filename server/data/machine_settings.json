@@ -1,0 +1,48 @@
+{
+  "workbench": {
+    "width": 302,
+    "height": 326,
+    "depth": 65,
+    "origin": "top-right",
+    "showWorkbench": true
+  },
+  "axes": {
+    "x": {
+      "visible": true,
+      "min": 0,
+      "max": 302,
+      "offset": 0,
+      "direction": 1,
+      "reversed": false,
+      "endstops": {
+        "hasMin": true,
+        "hasMax": false
+      }
+    },
+    "y": {
+      "visible": true,
+      "min": 0,
+      "max": 326,
+      "offset": 0,
+      "direction": 1,
+      "reversed": false,
+      "endstops": {
+        "hasMin": true,
+        "hasMax": false
+      }
+    },
+    "z": {
+      "visible": true,
+      "min": 0,
+      "max": 65,
+      "offset": 0,
+      "direction": 1,
+      "reversed": false,
+      "endstops": {
+        "hasMin": true,
+        "hasMax": true
+      }
+    }
+  },
+  "macros": []
+}

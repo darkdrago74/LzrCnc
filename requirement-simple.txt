@@ -4,3 +4,4 @@ build-essential
 python3
 udev
 curl
+potrace

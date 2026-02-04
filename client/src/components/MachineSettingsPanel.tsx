@@ -7,7 +7,8 @@ import type { MachineSettings, AxisSettings, WorkbenchSettings } from '../types'
 
 // ... (keep MoveIcon)
 
-function AxisVisualizer({ settings, onUpdateOrigin }: { settings: MachineSettings, onUpdateOrigin: (o: any) => void, updateAxis?: any }) {
+// Fix missing destructuring
+function AxisVisualizer({ settings, onUpdateOrigin, updateAxis }: { settings: MachineSettings, onUpdateOrigin: (o: any) => void, updateAxis?: any }) {
     const w = settings.workbench.width;
     const h = settings.workbench.height;
     const origin = settings.workbench.origin;
@@ -18,8 +19,8 @@ function AxisVisualizer({ settings, onUpdateOrigin }: { settings: MachineSetting
 
     return (
         <Canvas>
-            <PerspectiveCamera makeDefault position={[0, -bedH * 1.5, bedW * 1.5]} fov={50} />
-            <OrbitControls enableZoom={true} enablePan={true} maxPolarAngle={Math.PI / 2} />
+            <PerspectiveCamera makeDefault position={[0, 400, 400]} fov={45} />
+            <OrbitControls enableZoom={true} enablePan={true} maxPolarAngle={Math.PI / 2} target={[0, 0, 0]} />
             <ambientLight intensity={0.5} />
             <pointLight position={[100, 100, 100]} />
 
@@ -30,12 +31,13 @@ function AxisVisualizer({ settings, onUpdateOrigin }: { settings: MachineSetting
                 origin={origin}
                 settings={settings}
                 onUpdateOrigin={onUpdateOrigin}
+                updateAxis={updateAxis}
             />
         </Canvas>
     )
 }
 
-function SettingsScene({ w, h, origin, settings, onUpdateOrigin }: { w: number, h: number, origin: string, settings: MachineSettings, onUpdateOrigin: (o: any) => void }) {
+function SettingsScene({ w, h, origin, settings, onUpdateOrigin, updateAxis }: { w: number, h: number, origin: string, settings: MachineSettings, onUpdateOrigin: (o: any) => void, updateAxis: any }) {
     // Bed Mesh (Centered)
     // We visualize the Bed as a static object in the center of the viewer
     // We move the "Origin Marker" to the correct corner relative to this bed
@@ -77,8 +79,13 @@ function SettingsScene({ w, h, origin, settings, onUpdateOrigin }: { w: number, 
     const yVec = yDir * yRev;
     const zVec = zDir * zRev;
 
+    // Homing Positions
+    const xHome = settings.axes.x.homingPos || 'min';
+    const yHome = settings.axes.y.homingPos || 'min';
+    // const zHome = settings.axes.z.homingPos || 'max'; // Z Visualizer Removed per user request
+
     return (
-        <group rotation={[-Math.PI / 4, 0, 0]}> {/* Tilt the whole assembly for better angle */}
+        <group rotation={[-Math.PI / 2, 0, 0]}> {/* Flat top-down view (Plan XY) */}
             {/* Bed Plate */}
             <mesh receiveShadow>
                 <boxGeometry args={[w, h, 2]} />
@@ -103,8 +110,111 @@ function SettingsScene({ w, h, origin, settings, onUpdateOrigin }: { w: number, 
                     <meshStandardMaterial color="white" />
                 </mesh>
             </group>
+
+            {/* Homing Selectors */}
+            {/* Homing Selectors - Moved to Edge Centers */}
+            {/* X Axis */}
+            <HomingSelector
+                pos={[-w / 2 - 30, 0, 0]} // Left Edge Center
+                active={xHome === 'min'}
+                onClick={() => updateAxis('x', 'homingPos', 'min')}
+                color="red"
+                label={settings.axes.x.reversed ? "X+" : "X-"}
+            />
+            <HomingSelector
+                pos={[w / 2 + 30, 0, 0]} // Right Edge Center
+                active={xHome === 'max'}
+                onClick={() => updateAxis('x', 'homingPos', 'max')}
+                color="red"
+                label={settings.axes.x.reversed ? "X-" : "X+"}
+            />
+
+            {/* Y Axis */}
+            <HomingSelector
+                pos={[0, -h / 2 - 30, 0]} // Bottom Edge Center
+                active={yHome === 'min'}
+                onClick={() => updateAxis('y', 'homingPos', 'min')}
+                color="green"
+                label={settings.axes.y.reversed ? "Y+" : "Y-"}
+            />
+            <HomingSelector
+                pos={[0, h / 2 + 30, 0]} // Top Edge Center
+                active={yHome === 'max'}
+                onClick={() => updateAxis('y', 'homingPos', 'max')}
+                color="green"
+                label={settings.axes.y.reversed ? "Y-" : "Y+"}
+            />
+
+            {/* Z Axis Visualizer REMOVED as requested */}
+            {/* <SettingsZProbe ... /> */}
+
         </group>
     );
+}
+
+function HomingSelector({ pos, active, onClick, label, color }: any) {
+    return (
+        <group position={pos}>
+            <mesh onClick={(e) => { e.stopPropagation(); onClick(); }}>
+                <boxGeometry args={[10, 10, 5]} />
+                <meshStandardMaterial color={active ? color : "#334155"} emissive={active ? color : "#000"} emissiveIntensity={0.5} />
+            </mesh>
+            {active && (
+                <Html center position={[0, -15, 0]}>
+                    <div className="bg-black/80 text-white text-[10px] px-1 rounded whitespace-nowrap">HOME</div>
+                </Html>
+            )}
+            <Html center position={[0, 15, 0]}>
+                <div className={`text-[10px] font-bold ${active ? 'opacity-100' : 'opacity-50'} text-white`}>{label}</div>
+            </Html>
+        </group>
+    )
+}
+
+function SettingsZProbe({ pos, height, active, onToggle }: any) {
+    // Renders a vertical bar representing Z axis limit
+    // active = 'min' or 'max'
+    return (
+        <group position={pos}>
+            {/* Vertical Guide Line */}
+            <mesh position={[0, 0, height / 2]} rotation={[Math.PI / 2, 0, 0]}>
+                <cylinderGeometry args={[1, 1, height, 8]} />
+                <meshBasicMaterial color="blue" opacity={0.3} transparent />
+            </mesh>
+
+            {/* Z-MIN (Bottom) */}
+            <group position={[0, 0, 5]}>
+                <mesh onClick={(e) => { e.stopPropagation(); onToggle('min'); }}>
+                    <boxGeometry args={[10, 10, 5]} />
+                    <meshStandardMaterial color={active === 'min' ? "blue" : "#334155"} emissive={active === 'min' ? "blue" : "#000"} emissiveIntensity={0.5} />
+                </mesh>
+                <Html center position={[15, 0, 0]}>
+                    <div className="text-[10px] text-blue-200 font-bold">Z-MIN</div>
+                </Html>
+            </group>
+
+            {/* Z-MAX (Top) */}
+            <group position={[0, 0, height]}>
+                <mesh onClick={(e) => { e.stopPropagation(); onToggle('max'); }}>
+                    <boxGeometry args={[10, 10, 5]} />
+                    <meshStandardMaterial color={active === 'max' ? "blue" : "#334155"} emissive={active === 'max' ? "blue" : "#000"} emissiveIntensity={0.5} />
+                </mesh>
+                <Html center position={[15, 0, 0]}>
+                    <div className="text-[10px] text-blue-200 font-bold">Z-MAX</div>
+                </Html>
+                {active === 'max' && (
+                    <Html center position={[0, 15, 0]}>
+                        <div className="bg-black/80 text-white text-[10px] px-1 rounded">HOME</div>
+                    </Html>
+                )}
+            </group>
+            {active === 'min' && (
+                <Html center position={[0, 15, 5]}>
+                    <div className="bg-black/80 text-white text-[10px] px-1 rounded">HOME</div>
+                </Html>
+            )}
+        </group>
+    )
 }
 
 function OriginSelector({ pos, active, onClick, label }: any) {
@@ -471,15 +581,25 @@ export default function MachineSettingsPanel({ status, laserBeamEnabled, setLase
                                         placeholder="0"
                                     />
                                 </div>
-                                <label className="text-xs text-gray-400 flex items-center gap-2 cursor-pointer hover:text-white" title="Invert Positive Direction">
-                                    <input
-                                        type="checkbox"
-                                        checked={settings.axes.x.reversed}
-                                        onChange={e => updateAxis('x', 'reversed', e.target.checked)}
-                                        className="accent-red-500"
-                                    />
-                                    Reverse +Dir
-                                </label>
+                                <div className="flex items-center gap-2">
+                                    <select
+                                        value={settings.axes.x.homingPos || 'min'}
+                                        onChange={e => updateAxis('x', 'homingPos', e.target.value)}
+                                        className="bg-transparent text-xs text-gray-400 border-b border-gray-600 outline-none hover:text-white"
+                                    >
+                                        <option value="min">Home: Min</option>
+                                        <option value="max">Home: Max</option>
+                                    </select>
+                                    <label className="text-xs text-gray-400 flex items-center gap-2 cursor-pointer hover:text-white" title="Invert Positive Direction">
+                                        <input
+                                            type="checkbox"
+                                            checked={settings.axes.x.reversed}
+                                            onChange={e => updateAxis('x', 'reversed', e.target.checked)}
+                                            className="accent-red-500"
+                                        />
+                                        Reverse +Dir
+                                    </label>
+                                </div>
                             </div>
 
                             {/* Y Axis */}
@@ -494,15 +614,25 @@ export default function MachineSettingsPanel({ status, laserBeamEnabled, setLase
                                         placeholder="0"
                                     />
                                 </div>
-                                <label className="text-xs text-gray-400 flex items-center gap-2 cursor-pointer hover:text-white" title="Invert Positive Direction">
-                                    <input
-                                        type="checkbox"
-                                        checked={settings.axes.y.reversed}
-                                        onChange={e => updateAxis('y', 'reversed', e.target.checked)}
-                                        className="accent-green-500"
-                                    />
-                                    Reverse +Dir
-                                </label>
+                                <div className="flex items-center gap-2">
+                                    <select
+                                        value={settings.axes.y.homingPos || 'min'}
+                                        onChange={e => updateAxis('y', 'homingPos', e.target.value)}
+                                        className="bg-transparent text-xs text-gray-400 border-b border-gray-600 outline-none hover:text-white"
+                                    >
+                                        <option value="min">Home: Min</option>
+                                        <option value="max">Home: Max</option>
+                                    </select>
+                                    <label className="text-xs text-gray-400 flex items-center gap-2 cursor-pointer hover:text-white" title="Invert Positive Direction">
+                                        <input
+                                            type="checkbox"
+                                            checked={settings.axes.y.reversed}
+                                            onChange={e => updateAxis('y', 'reversed', e.target.checked)}
+                                            className="accent-green-500"
+                                        />
+                                        Reverse +Dir
+                                    </label>
+                                </div>
                             </div>
 
                             {/* Z Axis */}
@@ -543,6 +673,25 @@ export default function MachineSettingsPanel({ status, laserBeamEnabled, setLase
                                     </div>
                                 )}
                             </div>
+                            {/* Z Homing Buttons Row */}
+                            {settings.axes.z.visible && (
+                                <div className="flex gap-2 mt-1 w-full pl-8 pr-2">
+                                    <button
+                                        onClick={() => updateAxis('z', 'homingPos', 'max')}
+                                        className={`flex-1 py-1 text-[10px] rounded border border-white/10 ${(!settings.axes.z.homingPos || settings.axes.z.homingPos === 'max') ? 'bg-blue-600/50 text-white border-blue-500' : 'bg-transparent text-gray-500 hover:text-gray-300'}`}
+                                        title="Home to Top (Max Z)"
+                                    >
+                                        Home Top
+                                    </button>
+                                    <button
+                                        onClick={() => updateAxis('z', 'homingPos', 'min')}
+                                        className={`flex-1 py-1 text-[10px] rounded border border-white/10 ${settings.axes.z.homingPos === 'min' ? 'bg-blue-600/50 text-white border-blue-500' : 'bg-transparent text-gray-500 hover:text-gray-300'}`}
+                                        title="Home to Bottom (Min Z)"
+                                    >
+                                        Home Bottom
+                                    </button>
+                                </div>
+                            )}
                         </div>
                     </section>
                 </>

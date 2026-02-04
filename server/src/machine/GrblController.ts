@@ -28,6 +28,10 @@ export class GrblController extends EventEmitter implements MachineInterface {
                 setTimeout(() => {
                     this.send('$$');
                 }, 500); // Small delay to let bootloader settle
+
+                // Start Status Polling Loop
+                this.startPolling();
+
                 resolve();
             });
 
@@ -36,6 +40,7 @@ export class GrblController extends EventEmitter implements MachineInterface {
             });
 
             this.port.on('close', () => {
+                this.stopPolling();
                 this.status.state = 'Disconnected';
                 this.emitStatus();
                 this.port = null;
@@ -45,6 +50,23 @@ export class GrblController extends EventEmitter implements MachineInterface {
                 this.emit('error', err);
             });
         });
+    }
+
+    private pollTimer: NodeJS.Timeout | null = null;
+    private startPolling() {
+        if (this.pollTimer) clearInterval(this.pollTimer);
+        this.pollTimer = setInterval(() => {
+            if (this.port && this.port.isOpen) {
+                this.send('?');
+            }
+        }, 200);
+    }
+
+    private stopPolling() {
+        if (this.pollTimer) {
+            clearInterval(this.pollTimer);
+            this.pollTimer = null;
+        }
     }
 
     async disconnect(): Promise<void> {

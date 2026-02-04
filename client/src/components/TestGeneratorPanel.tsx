@@ -1,136 +1,188 @@
 import React, { useState } from 'react';
-import { Table, Zap } from 'lucide-react';
 
-interface TestGeneratorProps {
+interface Props {
     onGenerate: (gcode: string) => void;
 }
 
-const TestGeneratorPanel: React.FC<TestGeneratorProps> = ({ onGenerate }) => {
-    // Configuration
-    const [minSpeed, setMinSpeed] = useState(500);
-    const [maxSpeed, setMaxSpeed] = useState(3000);
+const TestGeneratorPanel: React.FC<Props> = ({ onGenerate }) => {
+    const [testType, setTestType] = useState<'power_ramp' | 'focus_z' | 'vector_quality'>('power_ramp');
+
+    // Power Ramp Settings
     const [minPower, setMinPower] = useState(10);
-    const [maxPower, setMaxPower] = useState(80);
-    const [gridSize, setGridSize] = useState(5); // 5x5
-    const [mode, setMode] = useState<'cut' | 'fill'>('cut');
+    const [maxPower, setMaxPower] = useState(100);
+    const [steps, setSteps] = useState(10);
+    const [speed, setSpeed] = useState(1000);
 
-    const generateGrid = () => {
-        const gcode = [
-            '; Laser Test Pattern',
-            'G21', // mm
-            'G90', // absolute
-            'M5',
-            `G0 Z0`, // assumes Z0
-        ];
+    // Focus Z Settings
+    const [zStart, setZStart] = useState(0);
+    const [zEnd, setZEnd] = useState(5);
+    const [zSteps, setZSteps] = useState(5);
 
-        const cellSize = 10; // 10mm squares
-        const spacing = 2; // 2mm gap
-        const stepX = (maxSpeed - minSpeed) / (gridSize - 1);
-        const stepY = (maxPower - minPower) / (gridSize - 1);
+    const generatePowerRamp = () => {
+        const lines: string[] = [];
+        lines.push('; Power Ramp Test');
+        lines.push('G21 G90');
+        lines.push('M5');
 
-        // X Axis = Speed
-        // Y Axis = Power
+        const stepWidth = 10; // mm
+        const stepHeight = 10; // mm
+        // const startX = 0;
+        // const startY = 0;
 
-        for (let row = 0; row < gridSize; row++) {
-            const power = minPower + (row * stepY);
-            // Invert row so high power is at top or bottom? Let's do bottom-up (Y+)
-            // Usually test grid 0,0 is bottom left
+        const powerStep = (maxPower - minPower) / (steps - 1);
 
-            for (let col = 0; col < gridSize; col++) {
-                const speed = minSpeed + (col * stepX);
+        for (let i = 0; i < steps; i++) {
+            const power = minPower + (i * powerStep);
+            const x = i * (stepWidth + 2);
 
-                const x = col * (cellSize + spacing);
-                const y = row * (cellSize + spacing);
+            // Move to start of block
+            lines.push(`G0 X${x} Y0`);
 
-                gcode.push(`; Cell ${col},${row}: S${Math.floor(speed)} mm/min, P${Math.floor(power)}%`);
-                // Calculate PWM S-value (assuming 1000 max)
-                const sVal = Math.floor((power / 100) * 1000);
+            // Raster block
+            // Simple zigzag fill
+            const fillDensity = 0.5; // mm per line
+            const yLines = Math.floor(stepHeight / fillDensity);
 
-                gcode.push(`M3 S${sVal}`);
+            // Convert % to S-value (assuming 1000 max)
+            const sVal = (power / 100) * 1000;
 
-                if (mode === 'cut') {
-                    // Draw square contour
-                    gcode.push(`G0 X${x} Y${y}`); // Move to start
-                    gcode.push(`G1 X${x + cellSize} Y${y} F${speed}`);
-                    gcode.push(`G1 X${x + cellSize} Y${y + cellSize} F${speed}`);
-                    gcode.push(`G1 X${x} Y${y + cellSize} F${speed}`);
-                    gcode.push(`G1 X${x} Y${y} F${speed}`);
-                } else {
-                    // Fill (ZigZag)
-                    const fillStep = 0.5; // 0.5mm stepover
-                    gcode.push(`G0 X${x} Y${y}`);
-                    for (let fy = 0; fy < cellSize; fy += fillStep) {
-                        // Scan line
-                        const startX = x;
-                        const endX = x + cellSize;
-                        const currentY = y + fy;
-
-                        // Simple One-Way raster for now
-                        gcode.push(`G0 X${startX} Y${currentY}`); // Rapid back
-                        gcode.push(`G1 X${endX} Y${currentY} F${speed}`); // Cut fwd
-                    }
-                }
-                gcode.push('M5'); // Off between cells
+            for (let j = 0; j < yLines; j++) {
+                const y = j * fillDensity;
+                // Move to line start
+                lines.push(`G0 X${x} Y${y}`);
+                lines.push(`G1 X${x + stepWidth} Y${y} S${sVal.toFixed(0)} F${speed}`);
+                lines.push('M5');
             }
+            // Label power (mockup)
         }
 
-        gcode.push('M5');
-        gcode.push('G0 X0 Y0');
+        lines.push('G0 X0 Y0');
+        onGenerate(lines.join('\n'));
+    };
 
-        onGenerate(gcode.join('\n'));
+    const generateFocusTest = () => {
+        const lines: string[] = [];
+        lines.push('; Focus Z-Ladder Test');
+        lines.push('G21 G90');
+        lines.push('M5');
+
+        const zStepSize = (zEnd - zStart) / (zSteps - 1);
+        const lineLength = 20;
+        const lineSpacing = 5;
+
+        for (let i = 0; i < zSteps; i++) {
+            const z = zStart + (i * zStepSize);
+            const y = i * lineSpacing;
+
+            lines.push(`G0 Z${z.toFixed(2)}`);
+            lines.push(`G0 X0 Y${y}`);
+            lines.push(`G1 X${lineLength} Y${y} S1000 F${speed}`);
+            lines.push('M5');
+        }
+
+        lines.push('G0 Z0');
+        lines.push('G0 X0 Y0');
+        onGenerate(lines.join('\n'));
+    };
+
+    const generateVectorQuality = () => {
+        // Generate a star pattern or similar geometry
+        const lines: string[] = [];
+        lines.push('; Vector Quality Test');
+        lines.push('G21 G90');
+        lines.push(`F${speed}`);
+
+        const cx = 20, cy = 20, r = 15;
+
+        lines.push(`G0 X${cx + r} Y${cy}`);
+        lines.push('M3 S1000');
+        lines.push(`G2 X${cx - r} Y${cy} R${r}`); // Half circle
+        lines.push(`G2 X${cx + r} Y${cy} R${r}`); // Half circle
+
+        // Square
+        lines.push('M5');
+        lines.push('G0 X40 Y40');
+        lines.push('M3 S1000');
+        lines.push('G1 X60 Y40');
+        lines.push('G1 X60 Y60');
+        lines.push('G1 X40 Y60');
+        lines.push('G1 X40 Y40');
+
+        lines.push('M5');
+        lines.push('G0 X0 Y0');
+        onGenerate(lines.join('\n'));
     };
 
     return (
-        <div className="bg-black/30 p-4 rounded border border-white/10 text-sm space-y-4">
-            <h3 className="font-semibold text-gray-300 flex items-center gap-2">
-                <Table size={16} /> Test Generator
-            </h3>
-
-            <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1">
-                    <label className="text-gray-500 text-xs">Rows/Cols</label>
-                    <input
-                        type="number"
-                        value={gridSize}
-                        onChange={e => setGridSize(Number(e.target.value))}
-                        className="w-full bg-black border border-gray-700 rounded p-1 text-white"
-                    />
-                </div>
-                <div className="space-y-1">
-                    <label className="text-gray-500 text-xs">Mode</label>
-                    <select
-                        value={mode}
-                        onChange={e => setMode(e.target.value as 'cut' | 'fill')}
-                        className="w-full bg-black border border-gray-700 rounded p-1 text-white"
-                    >
-                        <option value="cut">Line (Cut)</option>
-                        <option value="fill">Fill (Engrave)</option>
-                    </select>
-                </div>
-
-                <div className="space-y-1">
-                    <label className="text-gray-500 text-xs">Speed (mm/min)</label>
-                    <div className="flex gap-1">
-                        <input value={minSpeed} onChange={e => setMinSpeed(Number(e.target.value))} className="w-1/2 bg-black border border-gray-700 rounded p-1 text-white" placeholder="Min" />
-                        <input value={maxSpeed} onChange={e => setMaxSpeed(Number(e.target.value))} className="w-1/2 bg-black border border-gray-700 rounded p-1 text-white" placeholder="Max" />
-                    </div>
-                </div>
-
-                <div className="space-y-1">
-                    <label className="text-gray-500 text-xs">Power (%)</label>
-                    <div className="flex gap-1">
-                        <input value={minPower} onChange={e => setMinPower(Number(e.target.value))} className="w-1/2 bg-black border border-gray-700 rounded p-1 text-white" placeholder="Min" />
-                        <input value={maxPower} onChange={e => setMaxPower(Number(e.target.value))} className="w-1/2 bg-black border border-gray-700 rounded p-1 text-white" placeholder="Max" />
-                    </div>
-                </div>
+        <div className="grid grid-cols-1 gap-6 p-4">
+            <div className="flex gap-4 mb-4">
+                <button
+                    onClick={() => setTestType('power_ramp')}
+                    className={`px-3 py-1 rounded ${testType === 'power_ramp' ? 'bg-blue-600 text-white' : 'bg-white/10 text-gray-400'}`}
+                >Power Scale</button>
+                <button
+                    onClick={() => setTestType('focus_z')}
+                    className={`px-3 py-1 rounded ${testType === 'focus_z' ? 'bg-blue-600 text-white' : 'bg-white/10 text-gray-400'}`}
+                >Focus Z-Ladder</button>
+                <button
+                    onClick={() => setTestType('vector_quality')}
+                    className={`px-3 py-1 rounded ${testType === 'vector_quality' ? 'bg-blue-600 text-white' : 'bg-white/10 text-gray-400'}`}
+                >Vector Quality</button>
             </div>
 
-            <button
-                onClick={generateGrid}
-                className="w-full py-2 bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 text-white rounded font-medium shadow-lg shadow-blue-900/20 flex items-center justify-center gap-2"
-            >
-                <Zap size={16} /> Generate Test Grid
-            </button>
+            {testType === 'power_ramp' && (
+                <div className="space-y-4">
+                    <h3 className="text-white font-bold">Power Scale Generator</h3>
+                    <div className="grid grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-gray-400 text-sm">Min Power (%)</label>
+                            <input type="number" value={minPower} onChange={e => setMinPower(Number(e.target.value))} className="bg-black/20 border border-white/10 text-white px-2 py-1 rounded w-full" />
+                        </div>
+                        <div>
+                            <label className="block text-gray-400 text-sm">Max Power (%)</label>
+                            <input type="number" value={maxPower} onChange={e => setMaxPower(Number(e.target.value))} className="bg-black/20 border border-white/10 text-white px-2 py-1 rounded w-full" />
+                        </div>
+                        <div>
+                            <label className="block text-gray-400 text-sm">Steps</label>
+                            <input type="number" value={steps} onChange={e => setSteps(Number(e.target.value))} className="bg-black/20 border border-white/10 text-white px-2 py-1 rounded w-full" />
+                        </div>
+                        <div>
+                            <label className="block text-gray-400 text-sm">Feed Rate</label>
+                            <input type="number" value={speed} onChange={e => setSpeed(Number(e.target.value))} className="bg-black/20 border border-white/10 text-white px-2 py-1 rounded w-full" />
+                        </div>
+                    </div>
+                    <button onClick={generatePowerRamp} className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-500 w-full">Generate G-Code</button>
+                </div>
+            )}
+
+            {testType === 'focus_z' && (
+                <div className="space-y-4">
+                    <h3 className="text-white font-bold">Focus Z-Ladder Generator</h3>
+                    <div className="grid grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-gray-400 text-sm">Start Z (mm)</label>
+                            <input type="number" value={zStart} onChange={e => setZStart(Number(e.target.value))} className="bg-black/20 border border-white/10 text-white px-2 py-1 rounded w-full" />
+                        </div>
+                        <div>
+                            <label className="block text-gray-400 text-sm">End Z (mm)</label>
+                            <input type="number" value={zEnd} onChange={e => setZEnd(Number(e.target.value))} className="bg-black/20 border border-white/10 text-white px-2 py-1 rounded w-full" />
+                        </div>
+                        <div>
+                            <label className="block text-gray-400 text-sm">Steps</label>
+                            <input type="number" value={zSteps} onChange={e => setZSteps(Number(e.target.value))} className="bg-black/20 border border-white/10 text-white px-2 py-1 rounded w-full" />
+                        </div>
+                    </div>
+                    <button onClick={generateFocusTest} className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-500 w-full">Generate G-Code</button>
+                </div>
+            )}
+
+            {testType === 'vector_quality' && (
+                <div className="space-y-4">
+                    <h3 className="text-white font-bold">Vector Quality Test</h3>
+                    <p className="text-gray-400 text-sm">Generates circles and squares to test mechanical backlash and precision.</p>
+                    <button onClick={generateVectorQuality} className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-500 w-full">Generate G-Code</button>
+                </div>
+            )}
         </div>
     );
 };

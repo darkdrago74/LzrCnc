@@ -1,28 +1,65 @@
 import { FastifyInstance } from 'fastify';
 import { CamService } from '../cam/CamService.js';
-import { RasterOptions, VectorOptions } from '../cam/Tools.js';
 
 export default async function camRoutes(server: FastifyInstance) {
     const camService = new CamService();
 
     server.post('/cam/generate', async (request: any, reply) => {
-        const { type, fileContent, filePath, options } = request.body;
+        const { fileContent, filePath, fileName, operations, options } = request.body;
+        // Support both: uploaded file path OR raw content sent in body
+        // If fileContent is base64 string, convert to Buffer
+        let source: string | Buffer = filePath;
+
+        if (!source && fileContent) {
+            if (typeof fileContent === 'string' && fileContent.startsWith('data:')) {
+                // Remove prefix
+                const base64Data = fileContent.split(';base64,').pop();
+                if (base64Data) source = Buffer.from(base64Data, 'base64');
+            } else {
+                source = fileContent;
+            }
+        }
+
+        if (!source) {
+            return reply.code(400).send({ error: 'No file provided. Send filePath or fileContent.' });
+        }
+
+        // Construct Job
+        // If request sends a list of operations, use them.
+        // Legacy support: if request sends "type" and "options", wrap in single operation.
+        let jobOperations = operations;
+        if (!jobOperations && request.body.type) {
+            jobOperations = [{
+                id: 'legacy-op',
+                type: request.body.type === 'vector' ? 'vector_cut' : 'raster',
+                enabled: true,
+                settings: options
+            }];
+        }
 
         try {
-            let gcode = '';
+            const job = {
+                id: 'job-' + Date.now(),
+                name: fileName || 'Untitled Job',
+                status: 'draft',
+                sourceFilePath: source as any,
+                operations: jobOperations,
+                options: options || {} // Global fallback options
+            };
 
-            if (type === 'vector') {
-                if (!fileContent) return reply.code(400).send({ error: 'fileContent required for vector' });
-                // Cast options to VectorOptions? For now assume valid structure.
-                gcode = await camService.generateVector(fileContent, options as VectorOptions);
-            } else if (type === 'raster') {
-                if (!filePath) return reply.code(400).send({ error: 'filePath required for raster' });
-                gcode = await camService.generateRaster(filePath, options as RasterOptions);
-            } else {
-                return reply.code(400).send({ error: 'Invalid type. Use "vector" or "raster"' });
+            // If Source is Buffer, write to temp file if needed by vector processor (potrace usually needs file)
+            // Raster processor uses sharp which handles buffer.
+            if (Buffer.isBuffer(source)) {
+                const fs = await import('fs');
+                const path = await import('path');
+                const os = await import('os');
+                const tempPath = path.join(os.tmpdir(), `upload-${Date.now()}-${fileName || 'file'}`);
+                await fs.promises.writeFile(tempPath, source);
+                job.sourceFilePath = tempPath;
             }
 
-            return { status: 'success', gcode };
+            const result = await camService.generateJob(job as any);
+            return { status: 'success', gcode: result.gcode };
 
         } catch (err: any) {
             server.log.error(err);

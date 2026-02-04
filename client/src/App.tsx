@@ -62,7 +62,7 @@ function App() {
 
   useEffect(() => {
     fetchStatus(); // Immediate fetch on mount
-    const timer = setInterval(fetchStatus, 500);
+    const timer = setInterval(fetchStatus, 200); // 200ms poll as requested
     return () => clearInterval(timer);
   }, [fetchStatus]);
 

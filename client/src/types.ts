@@ -27,6 +27,7 @@ export interface AxisSettings {
     offset: number;
     direction: number;
     reversed: boolean;
+    homingPos?: 'min' | 'max'; // Where is the home switch?
     endstops: {
         hasMin: boolean;
         hasMax: boolean;

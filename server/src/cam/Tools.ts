@@ -21,24 +21,33 @@ export interface CNCTool extends BaseTool {
 
 export type MachineTool = LaserTool | CNCTool;
 
+// ... existing tools ...
+
 export interface VectorOptions {
     tool: MachineTool;
-    format: 'svg' | 'dxf';
+    format: 'svg' | 'dxf' | 'bitmap'; // bitmap means tracing
     feedrate: number;
-    cutHeight?: number; // For CNC
-    passes?: number; // Multi-pass
+    cutHeight?: number;
+    passes?: number;
+    // Potrace Options
+    turdSize?: number; // suppress speckles
+    alphaMax?: number; // corner threshold
+    optCurve?: boolean;
+    threshold?: number; // Binarization threshold for tracing
 }
 
 export interface RasterOptions {
-    tool: LaserTool; // Raster is laser only for now
-    width: number; // Target width in mm
-    height: number; // Target height in mm
-    dpi: number; // Resolution
+    tool: LaserTool;
+    width: number;
+    height: number;
+    dpi: number;
     feedrate: number;
-    powerMin: number; // 0-100 or 0-255 or 0-1
+    powerMin: number;
     powerMax: number;
     invert: boolean;
-    overscan?: number; // Overscan in mm to allow accel/decel
+    overscan?: number;
     scanlineDirection?: 'horizontal' | 'vertical' | 'diagonal';
     mode: 'grayscale' | 'bw' | 'dither';
+    dither?: boolean; // Legacy/flag convenience
+    threshold?: number; // White clip threshold (0-255)
 }
