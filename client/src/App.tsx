@@ -98,12 +98,20 @@ function App() {
 
   const handleCommand = async (gcode: string) => {
     try {
-      await fetch(`${API_URL}/command`, {
+      // alert(`[DEBUG] Sending: ${gcode} to ${API_URL}/command`); // Debug Alert
+      const res = await fetch(`${API_URL}/command`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ gcode })
       });
-    } catch (e) { console.error(e); }
+      if (!res.ok) {
+        const txt = await res.text();
+        alert(`[ERROR] Command Failed: ${res.status} ${txt}`);
+      }
+    } catch (e: any) {
+      console.error(e);
+      alert(`[ERROR] Network Error: ${e.message}`);
+    }
   };
 
   const handleProbe = async (options: unknown) => {
@@ -119,19 +127,11 @@ function App() {
   };
 
   const handleLaserTest = async (powerPct: number, duration: number) => {
-    // S value depends on controller max (usually 1000 for GRBL defaults, or 255)
-    // Assuming S1000 = 100%. 
     const sVal = Math.floor((powerPct / 100) * 1000);
     const cmd = sVal > 0 ? `M3 S${sVal}` : 'M5';
+    // alert(`[DEBUG] Fire Laser: Power=${powerPct}% S=${sVal} Cmd=${cmd}`);
     handleCommand(cmd);
-    // If toggle logic needed (e.g. click to fire, click to stop), UI handles it or we send specific pair.
-    // For now, simpler: user clicks Fire -> M3. User clicks again -> M5? 
-    // The UI currently just sends "Fire". Let's assume it's a toggle for now or momentary?
-    // User requirement: "Laser test function". Usually momentary button or toggle.
-    // Let's rely on user manually turning it off, or finding a way to toggle.
-    // IMPROVEMENT: MacroPanel should probably handle Toggle state for "Fire".
-    // For safety, let's just assume this fires ON. User must manually stop or we add a text input for Duration.
-    // Let's add a quick timeout for safety if duration > 0.
+
     if (duration > 0) {
       setTimeout(() => handleCommand('M5'), duration);
     }
@@ -142,7 +142,6 @@ function App() {
 
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
     gcode.forEach(line => {
-      // Basic parsing for G0/G1 X.. Y..
       const matchX = /X([\d.-]+)/.exec(line);
       const matchY = /Y([\d.-]+)/.exec(line);
       if (matchX) {
@@ -162,14 +161,8 @@ function App() {
       return;
     }
 
-    // Framing Sequence: 
-    // 1. Laser On (Low Power - hardcoded 1% or user pref? Let's use S10)
-    // 2. Move to corners
-    // 3. Laser Off
-    // Note: Moves should be G0 (Rapid)
-
     const cmds = [
-      'M3 S10', // Low power check
+      'M3 S10',
       `G0 X${minX} Y${minY}`,
       `G0 X${minX} Y${maxY}`,
       `G0 X${maxX} Y${maxY}`,
@@ -178,11 +171,8 @@ function App() {
       'M5'
     ];
 
-    // Execute sequentially
     for (const cmd of cmds) {
       await handleCommand(cmd);
-      // Small delay might be needed for visual tracking? 
-      // Browser fetch is async, but server queues it.
     }
   };
 

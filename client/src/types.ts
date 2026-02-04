@@ -18,6 +18,7 @@ export interface MachineStatus {
     };
     macros?: string[];
     machineSettings?: MachineSettings;
+    grblSettings?: Record<number, number>; // $30, $32, etc.
 }
 
 export interface AxisSettings {

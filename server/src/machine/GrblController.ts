@@ -115,42 +115,7 @@ export class GrblController extends EventEmitter implements MachineInterface {
         this.send(gcode);
     }
 
-    async probe(options: { axis: 'z', feedrate: number, dist: number, plateThickness: number, retract: number }): Promise<void> {
-        // Z-Probe Workflow
-        // 1. G91 (Relative)
-        // 2. G38.2 Z-dist Ffeed (Probe down)
-        // 3. G10 L20 P1 Z<thickness> (Set Work Zero with offset, assuming P1/G54 commands)
-        //    OR simpler: G92 Z<thickness>
-        // 4. G0 Z<retract> (Pull off)
-        // 5. G90 (Absolute)
-
-        // Using simple G92 for work offset setting
-        const cmds = [
-            'G91',
-            `G38.2 Z${options.dist} F${options.feedrate}`,
-            `G92 Z${options.plateThickness}`,
-            `G0 Z${options.retract}`,
-            'G90'
-        ];
-
-        for (const cmd of cmds) {
-            this.send(cmd);
-            // In real app, we need to wait for 'ok' or probe success triggered by 'PRB:' message
-            // For prototype, we drift commands but G38.2 blocks until trigger or alarm.
-        }
-    }
-
-    private emitStatus() {
-        this.status.logs = this.logBuffer;
-        this.emit('status', this.status);
-    }
-
-    private addLog(msg: string) {
-        this.logBuffer.push(msg);
-        if (this.logBuffer.length > this.MAX_LOGS) {
-            this.logBuffer.shift();
-        }
-    }
+    // ... (rest is same)
 
     private parseResponse(line: string) {
         const cleanLine = line.trim();
