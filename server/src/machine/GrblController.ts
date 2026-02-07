@@ -102,9 +102,20 @@ export class GrblController extends EventEmitter implements MachineInterface {
         return this.status;
     }
 
+    private emitStatus() {
+        this.emit('status', this.status);
+    }
+
     private send(cmd: string) {
         if (this.port && this.port.isOpen) {
             this.port.write(cmd + '\n');
+        }
+    }
+
+    private addLog(message: string) {
+        this.status.logs.push(message);
+        if (this.status.logs.length > this.MAX_LOGS) {
+            this.status.logs.shift();
         }
     }
 
@@ -114,6 +125,17 @@ export class GrblController extends EventEmitter implements MachineInterface {
     async command(gcode: string): Promise<void> {
         this.send(gcode);
     }
+
+    async probe(options: { axis: 'z', feedrate: number, dist: number, plateThickness: number, retract: number }): Promise<void> {
+        // Basic G38.2 implementation for GRBL
+        // G38.2 Z-10 F10
+        const cmd = `G38.2 ${options.axis.toUpperCase()}${options.dist} F${options.feedrate}`;
+        this.send(cmd);
+        // For prototype, we just resolve. Real implementation needs status monitoring for contact.
+        return Promise.resolve();
+    }
+
+
 
     // ... (rest is same)
 

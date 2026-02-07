@@ -5,6 +5,7 @@ export interface Material {
     id: string;
     name: string;
     type: 'cut' | 'engrave' | 'raster';
+    thickness: number; // Material thickness in mm
     speed: number;
     power: number; // 0-100 or S-value
     passes: number;

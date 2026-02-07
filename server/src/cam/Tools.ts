@@ -34,6 +34,10 @@ export interface VectorOptions {
     alphaMax?: number; // corner threshold
     optCurve?: boolean;
     threshold?: number; // Binarization threshold for tracing
+
+    // Z-Height Control
+    workingZ?: number;
+    safeZ?: number;
 }
 
 export interface RasterOptions {
@@ -50,4 +54,8 @@ export interface RasterOptions {
     mode: 'grayscale' | 'bw' | 'dither';
     dither?: boolean; // Legacy/flag convenience
     threshold?: number; // White clip threshold (0-255)
+
+    // Z-Height Control
+    workingZ?: number;
+    safeZ?: number;
 }

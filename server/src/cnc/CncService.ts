@@ -1,9 +1,10 @@
 import DxfParser from 'dxf-parser';
 import { CncTool } from './ToolLibrary.js';
+// @ts-ignore
 import ClipperLib from 'js-clipper';
 import fs from 'fs';
 import makerjs from 'makerjs';
-import { Jimp } from 'jimp';
+import Jimp from 'jimp';
 
 export interface CncJob2D {
     id: string;
@@ -55,11 +56,11 @@ export class CncService {
 
         if (isSvg) {
             const model = makerjs.importer.fromSVG(rawContent);
-            const chains = makerjs.model.findChains(model);
+            const chains = makerjs.model.findChains(model) as any[];
             chains.forEach(chain => {
                 const keyPoints = makerjs.chain.toKeyPoints(chain, 1);
                 const path: Array<{ X: number, Y: number }> = [];
-                keyPoints.forEach((p: number[]) => { path.push({ X: p[0] * SCALE, Y: p[1] * SCALE }); });
+                keyPoints.forEach((p: any) => { path.push({ X: p[0] * SCALE, Y: p[1] * SCALE }); });
                 if (path.length > 2) paths.push(path);
             });
         } else {
@@ -232,13 +233,13 @@ export class CncService {
         const toolDiameter = job.tool.diameter;
         const stepover = job.resolution || (toolDiameter * 0.4);
 
-        const aspectRatio = image.height / image.width;
+        const aspectRatio = image.bitmap.height / image.bitmap.width;
         const targetHeightMm = targetWidthMm * aspectRatio;
 
         const pixelW = Math.floor(targetWidthMm / stepover);
         const pixelH = Math.floor(targetHeightMm / stepover);
 
-        image.resize({ w: pixelW, h: pixelH });
+        image.resize(pixelW, pixelH);
 
         const grayscale = image.grayscale();
 

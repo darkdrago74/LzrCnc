@@ -95,6 +95,9 @@ export class VectorProcessor extends CamProcessor {
         commands.push('; Vector Operation');
         commands.push(`F${feedrate}`);
 
+        if (options.safeZ !== undefined) commands.push(`G0 Z${options.safeZ.toFixed(3)}`);
+        if (options.workingZ !== undefined) commands.push(`G0 Z${options.workingZ.toFixed(3)}`);
+
         const walk = (m: makerjs.IModel, offset = { x: 0, y: 0 }) => {
             if (m.paths) {
                 for (const id in m.paths) {
@@ -150,6 +153,7 @@ export class VectorProcessor extends CamProcessor {
         };
 
         walk(model);
+        if (options.safeZ !== undefined) commands.push(`G0 Z${options.safeZ.toFixed(3)}`);
         commands.push('G0 X0 Y0');
         return commands.join('\n');
     }

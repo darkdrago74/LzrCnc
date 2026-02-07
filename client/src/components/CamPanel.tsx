@@ -11,6 +11,7 @@ import VisualizerScene from './Visualizer/VisualizerScene';
 import { CncPanel } from './cnc/CncPanel';
 import type { CamOperation } from './cam/interfaces';
 import { DesignerToolbar, type SceneObject } from './cam/DesignerToolbar';
+import { HelpIcon } from './ui/Tooltip';
 // Simple random ID generator (avoiding uuid dep)
 const uuidv4 = () => Math.random().toString(36).substring(2, 10);
 
@@ -28,6 +29,12 @@ const CamPanel: React.FC<CamPanelProps> = ({ onGenerate }) => {
     const [objects, setObjects] = useState<SceneObject[]>([]);
     // Legacy file state kept for compatibility, but primarily using objects now
     const [activeTab, setActiveTab] = useState<'laser' | 'cnc' | 'materials' | 'generator'>('laser');
+
+    const [materialThickness, setMaterialThickness] = useState(3);
+    const [baseFocusZ, setBaseFocusZ] = useState(-60);
+    const [safeZ, setSafeZ] = useState<number | null>(5);
+
+    const workingZ = baseFocusZ + materialThickness;
 
     const addObject = (type: SceneObject['type'], content: string) => {
         const newObj: SceneObject = {
@@ -164,7 +171,10 @@ const CamPanel: React.FC<CamPanelProps> = ({ onGenerate }) => {
                     fileName,
                     fileContent: content, // Sends DataURL or SVG content
                     operations,
-                    options: {} // Global options if needed
+                    options: {
+                        workingZ,
+                        safeZ: safeZ ?? undefined
+                    } // Global options
                 })
             });
 
@@ -209,38 +219,138 @@ const CamPanel: React.FC<CamPanelProps> = ({ onGenerate }) => {
     const selectedOp = operations.find(o => o.id === selectedOpId);
 
     return (
-        <div style={{ padding: '20px', maxWidth: '1000px', margin: '0 auto' }}>
-            {/* Main Tabs */}
-            <div className="flex gap-4 mb-6 border-b border-white/10 pb-2">
-                <button onClick={() => setActiveTab('laser')} className={`px-4 py-2 rounded ${activeTab === 'laser' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}`}>
-                    Laser CAM
+        <div className="flex h-full w-full bg-gradient-to-br from-black to-gray-900/50">
+            {/* 1. Vertical Navigation Sidebar (Leftmost) */}
+            <div className="w-16 flex flex-col gap-4 border-r border-white/10 pr-2 pt-4 bg-black/40 items-center">
+                <button
+                    onClick={() => setActiveTab('laser')}
+                    className={`nav-btn p-3 rounded-lg flex flex-col items-center justify-center gap-1 transition-all link-hover ${activeTab === 'laser' ? 'bg-blue-600/20 text-blue-400 border border-blue-500/50 shadow-[0_0_15px_rgba(37,99,235,0.3)]' : 'text-gray-500 hover:text-gray-200 hover:bg-white/5'}`}
+                    title="Laser CAM"
+                >
+                    <span className="text-xl">⚡</span>
+                    <span className="text-[9px] font-bold uppercase tracking-wider">Laser</span>
                 </button>
-                <button onClick={() => setActiveTab('cnc')} className={`px-4 py-2 rounded ${activeTab === 'cnc' ? 'bg-orange-600 text-white' : 'text-gray-400 hover:text-white'}`}>
-                    CNC (Machining)
+                <button
+                    onClick={() => setActiveTab('cnc')}
+                    className={`nav-btn p-3 rounded-lg flex flex-col items-center justify-center gap-1 transition-all link-hover ${activeTab === 'cnc' ? 'bg-orange-600/20 text-orange-400 border border-orange-500/50 shadow-[0_0_15px_rgba(234,88,12,0.3)]' : 'text-gray-500 hover:text-gray-200 hover:bg-white/5'}`}
+                    title="CNC Machining"
+                >
+                    <span className="text-xl">🔩</span>
+                    <span className="text-[9px] font-bold uppercase tracking-wider">CNC</span>
                 </button>
-                <button onClick={() => setActiveTab('materials')} className={`px-4 py-2 rounded ${activeTab === 'materials' ? 'bg-white/10 text-white' : 'text-gray-400 hover:text-white'}`}>
-                    Library
+                <button
+                    onClick={() => setActiveTab('materials')}
+                    className={`nav-btn p-3 rounded-lg flex flex-col items-center justify-center gap-1 transition-all link-hover ${activeTab === 'materials' ? 'bg-white/10 text-white border border-white/20' : 'text-gray-500 hover:text-gray-200 hover:bg-white/5'}`}
+                    title="Library"
+                >
+                    <span className="text-xl">📚</span>
+                    <span className="text-[9px] font-bold uppercase tracking-wider">Lib</span>
                 </button>
-                <button onClick={() => setActiveTab('generator')} className={`px-4 py-2 rounded ${activeTab === 'generator' ? 'bg-white/10 text-white' : 'text-gray-400 hover:text-white'}`}>
-                    Test Gen
+                <button
+                    onClick={() => setActiveTab('generator')}
+                    className={`nav-btn p-3 rounded-lg flex flex-col items-center justify-center gap-1 transition-all link-hover ${activeTab === 'generator' ? 'bg-white/10 text-white border border-white/20' : 'text-gray-500 hover:text-gray-200 hover:bg-white/5'}`}
+                    title="Test Generator"
+                >
+                    <span className="text-xl">🧪</span>
+                    <span className="text-[9px] font-bold uppercase tracking-wider">Test</span>
                 </button>
             </div>
 
-            {activeTab === 'laser' && (
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    <div className="md:col-span-1 space-y-4">
-                        <FileUpload onFileLoaded={handleFile} />
+            {/* 2. Control Stack (Middle, Fixed Width) */}
+            <div className="w-[450px] flex flex-col border-r border-white/10 bg-black/20 backdrop-blur-sm h-full flex-none z-10 shadow-[5px_0_30px_rgba(0,0,0,0.5)]">
+                <div className="flex-1 overflow-y-auto p-4 space-y-6 scrollbar-hide">
 
-                        <DesignerToolbar
-                            onAddRect={handleAddRect}
-                            onAddCircle={handleAddCircle}
-                            onAddText={handleAddText}
-                        />
-                        <button onClick={handleDeleteObject} className="text-xs text-red-500 mb-2">Delete Selected</button>
+                    {activeTab === 'laser' && (
+                        <>
+                            {/* Materials & Config */}
+                            <div className="glass-panel p-4 rounded-xl border border-white/10 relative overflow-hidden group">
+                                <div className="absolute top-0 right-0 p-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <div className="w-2 h-2 rounded-full bg-orange-500 shadow-[0_0_10px_rgba(249,115,22,0.8)] animate-pulse"></div>
+                                </div>
+                                <h3 className="text-orange-400 font-bold mb-4 uppercase text-[10px] tracking-[0.2em] flex items-center gap-2">
+                                    <span>Setup & Material</span>
+                                </h3>
 
-                        {/* Operation Stack (Needs to apply to Combined Scene) */}
-                        {fileName && (
-                            <>
+                                <div className="space-y-4">
+                                    {/* Library Select */}
+                                    <div className="bg-black/30 rounded-lg p-3 border border-white/5">
+                                        <div className="flex justify-between items-center mb-2">
+                                            <span className="text-gray-400 text-xs font-medium">Library Preset</span>
+                                            <HelpIcon text="Load speed/power settings from database" />
+                                        </div>
+                                        <MaterialsPanel onSelect={(mat) => {
+                                            setMaterialThickness(mat.thickness);
+                                            applyMaterial(mat);
+                                        }} />
+                                    </div>
+
+                                    {/* Manual Overrides */}
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <div>
+                                            <div className="flex items-center gap-2 mb-1">
+                                                <label className="text-gray-500 text-[10px] uppercase font-bold">Thickness</label>
+                                                <HelpIcon text="Material thickness in mm. Affects Z-height." />
+                                            </div>
+                                            <div className="relative">
+                                                <input
+                                                    type="number"
+                                                    value={materialThickness}
+                                                    onChange={e => setMaterialThickness(Number(e.target.value))}
+                                                    className="w-full bg-black/50 border border-white/10 rounded-lg px-3 py-2 text-white font-mono focus:border-orange-500/50 focus:outline-none transition-colors"
+                                                />
+                                                <span className="absolute right-3 top-2 text-gray-600 text-xs pointer-events-none">mm</span>
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <div className="flex items-center gap-2 mb-1">
+                                                <label className="text-gray-500 text-[10px] uppercase font-bold">Focus Offset</label>
+                                                <HelpIcon text="Z-offset from bed (usually -height)." />
+                                            </div>
+                                            <div className="relative">
+                                                <input
+                                                    type="number"
+                                                    value={baseFocusZ}
+                                                    onChange={e => setBaseFocusZ(Number(e.target.value))}
+                                                    className="w-full bg-black/50 border border-white/10 rounded-lg px-3 py-2 text-white font-mono focus:border-orange-500/50 focus:outline-none transition-colors"
+                                                />
+                                                <span className="absolute right-3 top-2 text-gray-600 text-xs pointer-events-none">mm</span>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div className="flex items-center justify-between bg-white/5 p-2 rounded-lg border border-white/5">
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-gray-500 text-xs">Safe Z</span>
+                                            <HelpIcon text="Retract height for rapid moves" />
+                                        </div>
+                                        <div className="flex items-center gap-3">
+                                            <span className="font-mono text-blue-400 text-sm">{safeZ ?? 'OFF'}</span>
+                                            <div className={`w-3 h-3 rounded-full ${safeZ ? 'bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.6)]' : 'bg-gray-700'}`}></div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Designer & Ops */}
+                            <div className="glass-panel p-4 rounded-xl border border-white/10">
+                                <h3 className="text-blue-400 font-bold mb-4 uppercase text-[10px] tracking-[0.2em] flex items-center justify-between">
+                                    <span>Designer</span>
+                                    <FileUpload onFileLoaded={handleFile} />
+                                </h3>
+
+                                <div className="mb-6 p-2 bg-gradient-to-r from-black/60 to-transparent rounded-lg border border-white/5">
+                                    <DesignerToolbar
+                                        onAddRect={handleAddRect}
+                                        onAddCircle={handleAddCircle}
+                                        onAddText={handleAddText}
+                                    />
+                                    <div className="h-px bg-white/10 my-2"></div>
+                                    <button onClick={handleDeleteObject} className="w-full py-1 text-xs text-red-500 hover:text-red-400 hover:bg-red-900/10 rounded transition-colors flex items-center justify-center gap-2">
+                                        <span>🗑️</span> Delete Selection
+                                    </button>
+                                </div>
+
+                                <h3 className="text-green-400 font-bold mb-4 uppercase text-[10px] tracking-[0.2em]">Operations</h3>
                                 <LaserOperationStack
                                     operations={operations}
                                     onChange={setOperations}
@@ -249,19 +359,35 @@ const CamPanel: React.FC<CamPanelProps> = ({ onGenerate }) => {
                                 />
 
                                 {selectedOp && (
-                                    <OperationSettings
-                                        operation={selectedOp}
-                                        onChange={handleOpChange}
-                                    />
+                                    <div className="mt-4 bg-black/40 rounded-lg p-3 border border-white/10">
+                                        <div className="flex justify-between items-center mb-2">
+                                            <span className="text-[10px] uppercase text-gray-500 font-bold">Settings</span>
+                                            <HelpIcon text="Configure speed, power, and passes for this layer" />
+                                        </div>
+                                        <OperationSettings
+                                            operation={selectedOp}
+                                            onChange={handleOpChange}
+                                        />
+                                    </div>
                                 )}
 
-                                <div className="flex gap-2">
+                                <div className="mt-6 space-y-3">
                                     <button
                                         onClick={generateGcode}
                                         disabled={loading}
-                                        className="flex-1 py-3 bg-blue-600 hover:bg-blue-500 rounded text-white font-bold disabled:opacity-50"
+                                        className="w-full py-3 bg-gradient-to-r from-blue-700 to-blue-600 hover:from-blue-600 hover:to-blue-500 rounded-lg text-white font-bold disabled:opacity-50 shadow-lg shadow-blue-900/30 border border-blue-500/30 transition-all flex items-center justify-center gap-2 group"
                                     >
-                                        {loading ? 'Processing...' : 'Generate G-Code'}
+                                        {loading ? (
+                                            <>
+                                                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                                                <span>Calculating...</span>
+                                            </>
+                                        ) : (
+                                            <>
+                                                <span>🚀</span>
+                                                <span>Generate G-Code</span>
+                                            </>
+                                        )}
                                     </button>
 
                                     {gcode && (
@@ -275,37 +401,47 @@ const CamPanel: React.FC<CamPanelProps> = ({ onGenerate }) => {
                                                 a.click();
                                                 URL.revokeObjectURL(url);
                                             }}
-                                            className="px-4 bg-white/10 hover:bg-white/20 rounded text-white"
-                                            title="Download G-Code"
+                                            className="w-full py-2 bg-white/5 hover:bg-white/10 rounded-lg text-gray-300 border border-white/10 flex items-center justify-center gap-2 transition-colors"
                                         >
-                                            💾
+                                            <span>💾</span> Download File
                                         </button>
                                     )}
                                 </div>
-                            </>
-                        )}
-                    </div>
+                            </div>
+                        </>
+                    )}
 
-                    <div className="md:col-span-2 bg-black/40 rounded p-4 min-h-[500px] border border-white/10">
+                    {activeTab === 'cnc' && <CncPanel onGenerate={onGenerate} />}
+                    {activeTab === 'materials' && <MaterialsPanel onSelect={applyMaterial} />}
+                    {activeTab === 'generator' && <TestGeneratorPanel onGenerate={handleTestGenerate} />}
+                </div>
+            </div>
 
-                        <div className="mt-4">
-                            {gcode && <GcodePreview gcode={gcode} />}
-                        </div>
+            {/* 3. Visualizer / Preview (Right, Resizable/Flex) */}
+            <div className="flex-1 bg-gradient-to-b from-gray-900 via-gray-900 to-black relative overflow-hidden shadow-inner">
+                <div className="absolute inset-0 bg-[url('/grid.svg')] opacity-10 pointer-events-none"></div>
+
+                {/* Toolbar / Header for Visualizer */}
+                <div className="absolute top-4 left-4 right-4 z-10 flex justify-between items-start pointer-events-none">
+                    <div className="bg-black/60 backdrop-blur rounded-lg px-3 py-1 border border-white/10 pointer-events-auto">
+                        <span className="text-xs text-gray-400 font-mono">
+                            {objects.length > 0 ? `${objects.length} Objects` : 'Empty Workspace'}
+                        </span>
                     </div>
                 </div>
-            )}
 
-            {activeTab === 'cnc' && (
-                <CncPanel onGenerate={onGenerate} />
-            )}
-
-            {activeTab === 'materials' && (
-                <MaterialsPanel onSelect={applyMaterial} />
-            )}
-
-            {activeTab === 'generator' && (
-                <TestGeneratorPanel onGenerate={handleTestGenerate} />
-            )}
+                <div className="w-full h-full flex items-center justify-center">
+                    {gcode ? (
+                        <GcodePreview gcode={gcode} />
+                    ) : (
+                        <div className="text-center opacity-30 select-none">
+                            <div className="text-6xl mb-4">📐</div>
+                            <h2 className="text-xl font-light text-gray-400">Workspace Ready</h2>
+                            <p className="text-sm text-gray-600 mt-2">Import a vector or create a shape to begin</p>
+                        </div>
+                    )}
+                </div>
+            </div>
         </div>
     );
 };

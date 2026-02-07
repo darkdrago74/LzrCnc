@@ -5,6 +5,7 @@ interface Material {
     id: string;
     name: string;
     type: 'cut' | 'engrave' | 'raster';
+    thickness: number; // mm
     speed: number;
     power: number;
     passes: number;
@@ -20,6 +21,7 @@ const MaterialsPanel: React.FC<MaterialsPanelProps> = ({ onSelect }) => {
     const [editMat, setEditMat] = useState<Partial<Material>>({
         name: 'New Material',
         type: 'cut',
+        thickness: 3,
         speed: 1000,
         power: 100,
         passes: 1
@@ -96,7 +98,16 @@ const MaterialsPanel: React.FC<MaterialsPanelProps> = ({ onSelect }) => {
                         <input
                             type="number"
                             className="bg-black border border-gray-700 rounded p-1 text-white"
+                            placeholder="Thickness (mm)"
+                            title="Thickness (mm)"
+                            value={editMat.thickness}
+                            onChange={e => setEditMat({ ...editMat, thickness: Number(e.target.value) })}
+                        />
+                        <input
+                            type="number"
+                            className="bg-black border border-gray-700 rounded p-1 text-white"
                             placeholder="Speed"
+                            title="Speed (mm/min)"
                             value={editMat.speed}
                             onChange={e => setEditMat({ ...editMat, speed: Number(e.target.value) })}
                         />
@@ -104,6 +115,7 @@ const MaterialsPanel: React.FC<MaterialsPanelProps> = ({ onSelect }) => {
                             type="number"
                             className="bg-black border border-gray-700 rounded p-1 text-white"
                             placeholder="Power %"
+                            title="Power %"
                             value={editMat.power}
                             onChange={e => setEditMat({ ...editMat, power: Number(e.target.value) })}
                         />
@@ -111,6 +123,7 @@ const MaterialsPanel: React.FC<MaterialsPanelProps> = ({ onSelect }) => {
                             type="number"
                             className="bg-black border border-gray-700 rounded p-1 text-white"
                             placeholder="Passes"
+                            title="Passes"
                             value={editMat.passes}
                             onChange={e => setEditMat({ ...editMat, passes: Number(e.target.value) })}
                         />
@@ -130,7 +143,7 @@ const MaterialsPanel: React.FC<MaterialsPanelProps> = ({ onSelect }) => {
                         <div onClick={() => onSelect && onSelect(mat)} className="cursor-pointer flex-1">
                             <div className="font-medium text-gray-200">{mat.name}</div>
                             <div className="text-xs text-gray-500 capitalize">
-                                {mat.type} • S{mat.speed} P{mat.power}% {mat.passes > 1 ? `(${mat.passes}x)` : ''}
+                                {mat.type} • {mat.thickness}mm • S{mat.speed} P{mat.power}% {mat.passes > 1 ? `(${mat.passes}x)` : ''}
                             </div>
                         </div>
                         <button

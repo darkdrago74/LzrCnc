@@ -35,6 +35,11 @@ export class RasterProcessor extends CamProcessor {
         lines.push(`; Raster Operation: ${operation.id}`);
         lines.push(`; Dither: ${options.dither}, Threshold: ${options.threshold}`);
 
+        // Initial Z Moves
+        if (options.safeZ !== undefined) lines.push(`G0 Z${options.safeZ.toFixed(3)}`);
+        lines.push('G0 X0 Y0'); // Go to Origin first
+        if (options.workingZ !== undefined) lines.push(`G0 Z${options.workingZ.toFixed(3)}`);
+
         const stepX = width / info.width;
         const stepY = height / info.height;
         const pRange = powerMax - powerMin;
@@ -161,6 +166,7 @@ export class RasterProcessor extends CamProcessor {
         }
 
         lines.push('M5');
+        if (options.safeZ !== undefined) lines.push(`G0 Z${options.safeZ.toFixed(3)}`);
         lines.push('G0 X0 Y0');
 
         return {
