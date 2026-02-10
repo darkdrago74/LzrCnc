@@ -10,31 +10,50 @@ import { DitheringPreview } from './cam/DitheringPreview';
 import VisualizerScene from './Visualizer/VisualizerScene';
 import { CncPanel } from './cnc/CncPanel';
 import type { CamOperation } from './cam/interfaces';
-import { DesignerToolbar, type SceneObject } from './cam/DesignerToolbar';
+import { DesignerToolbar } from './cam/DesignerToolbar';
 import { HelpIcon } from './ui/Tooltip';
+import { ObjectProperties } from './cam/ObjectProperties';
+import { ChevronRight, ChevronLeft } from 'lucide-react';
+import type { SceneObject } from '../types';
 // Simple random ID generator (avoiding uuid dep)
 const uuidv4 = () => Math.random().toString(36).substring(2, 10);
 
+// Updated Prop Interface
 interface CamPanelProps {
     onGenerate: (gcode: string) => void;
+    objects: SceneObject[];
+    setObjects: React.Dispatch<React.SetStateAction<SceneObject[]>>;
+    setSidebarWidth: (w: number) => void;
 }
 
-const CamPanel: React.FC<CamPanelProps> = ({ onGenerate }) => {
+const CamPanel: React.FC<CamPanelProps> = ({ onGenerate, objects, setObjects, setSidebarWidth }) => {
     const [fileName, setFileName] = useState<string | null>(null);
     const [fileContent, setFileContent] = useState<string | null>(null);
     const [operations, setOperations] = useState<CamOperation[]>([]);
     const [selectedOpId, setSelectedOpId] = useState<string | null>(null);
     const [gcode, setGcode] = useState<string>('');
     const [loading, setLoading] = useState(false);
-    const [objects, setObjects] = useState<SceneObject[]>([]);
+
     // Legacy file state kept for compatibility, but primarily using objects now
     const [activeTab, setActiveTab] = useState<'laser' | 'cnc' | 'materials' | 'generator'>('laser');
+    const [isExpanded, setIsExpanded] = useState(true);
 
     const [materialThickness, setMaterialThickness] = useState(3);
     const [baseFocusZ, setBaseFocusZ] = useState(-60);
     const [safeZ, setSafeZ] = useState<number | null>(5);
 
     const workingZ = baseFocusZ + materialThickness;
+
+    // Sync Sidebar Width with App.tsx
+    React.useEffect(() => {
+        // Nav (64px) + Panel (450 or 700)
+        // Wait, the Nav is inside CamPanel.
+        // So total width = 64 + (isExpanded ? 700 : 450)
+        // Actually, let's make the panel content itself 450/700.
+        const navWidth = 64;
+        const contentWidth = isExpanded ? 700 : 450;
+        setSidebarWidth(navWidth + contentWidth);
+    }, [isExpanded, setSidebarWidth]);
 
     const addObject = (type: SceneObject['type'], content: string) => {
         const newObj: SceneObject = {
@@ -53,18 +72,18 @@ const CamPanel: React.FC<CamPanelProps> = ({ onGenerate }) => {
     };
 
     const handleAddRect = () => {
-        const svg = `<svg width="100" height="100" xmlns="http://www.w3.org/2000/svg"><rect x="0" y="0" width="100" height="100" fill="none" stroke="black" stroke-width="2"/></svg>`;
+        const svg = `<svg width="100" height="100" xmlns="http://www.w3.org/2000/svg"><rect x="0" y="0" width="100" height="100" fill="none" stroke="cyan" stroke-width="5"/></svg>`;
         addObject('rect', svg);
     };
 
     const handleAddCircle = () => {
-        const svg = `<svg width="100" height="100" xmlns="http://www.w3.org/2000/svg"><circle cx="50" cy="50" r="48" fill="none" stroke="black" stroke-width="2"/></svg>`;
+        const svg = `<svg width="100" height="100" xmlns="http://www.w3.org/2000/svg"><circle cx="50" cy="50" r="48" fill="none" stroke="cyan" stroke-width="5"/></svg>`;
         addObject('circle', svg);
     };
 
     const handleAddText = (text: string) => {
         // Basic SVG Text
-        const svg = `<svg width="200" height="50" xmlns="http://www.w3.org/2000/svg"><text x="0" y="40" font-family="Arial" font-size="40" fill="none" stroke="black">${text}</text></svg>`;
+        const svg = `<svg width="200" height="50" xmlns="http://www.w3.org/2000/svg"><text x="0" y="40" font-family="Arial" font-size="40" fill="cyan" stroke="none">${text}</text></svg>`;
         addObject('text', svg);
     };
 
@@ -219,9 +238,9 @@ const CamPanel: React.FC<CamPanelProps> = ({ onGenerate }) => {
     const selectedOp = operations.find(o => o.id === selectedOpId);
 
     return (
-        <div className="flex h-full w-full bg-gradient-to-br from-black to-gray-900/50">
+        <div className="flex h-full w-full bg-transparent text-gray-100">
             {/* 1. Vertical Navigation Sidebar (Leftmost) */}
-            <div className="w-16 flex flex-col gap-4 border-r border-white/10 pr-2 pt-4 bg-black/40 items-center">
+            <div className="w-16 flex-none flex flex-col gap-4 border-r border-white/10 pr-2 pt-4 bg-black/40 items-center">
                 <button
                     onClick={() => setActiveTab('laser')}
                     className={`nav-btn p-3 rounded-lg flex flex-col items-center justify-center gap-1 transition-all link-hover ${activeTab === 'laser' ? 'bg-blue-600/20 text-blue-400 border border-blue-500/50 shadow-[0_0_15px_rgba(37,99,235,0.3)]' : 'text-gray-500 hover:text-gray-200 hover:bg-white/5'}`}
@@ -256,9 +275,23 @@ const CamPanel: React.FC<CamPanelProps> = ({ onGenerate }) => {
                 </button>
             </div>
 
-            {/* 2. Control Stack (Middle, Fixed Width) */}
-            <div className="w-[450px] flex flex-col border-r border-white/10 bg-black/20 backdrop-blur-sm h-full flex-none z-10 shadow-[5px_0_30px_rgba(0,0,0,0.5)]">
-                <div className="flex-1 overflow-y-auto p-4 space-y-6 scrollbar-hide">
+            {/* 2. Control Stack (Fills the Sidebar Width) */}
+            <div className="flex-1 flex flex-col h-full overflow-hidden bg-black/20">
+                {/* Fixed Header for Toggle */}
+                <div className="flex items-center gap-3 p-2 border-b border-white/10 bg-black/40 backdrop-blur shrink-0">
+                    <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest pl-2">
+                        {activeTab === 'laser' ? 'Laser CAM' : activeTab}
+                    </span>
+                    <button
+                        onClick={() => setIsExpanded(!isExpanded)}
+                        className="ml-auto p-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-gray-400 hover:text-white transition-colors flex items-center justify-center shadow-sm"
+                        title={isExpanded ? "Collapse View" : "Expand View"}
+                    >
+                        {isExpanded ? <ChevronLeft size={14} /> : <ChevronRight size={14} />}
+                    </button>
+                </div>
+
+                <div className="flex-1 overflow-y-auto p-4 space-y-6 scrollbar-hide relative">
 
                     {activeTab === 'laser' && (
                         <>
@@ -335,19 +368,33 @@ const CamPanel: React.FC<CamPanelProps> = ({ onGenerate }) => {
                             <div className="glass-panel p-4 rounded-xl border border-white/10">
                                 <h3 className="text-blue-400 font-bold mb-4 uppercase text-[10px] tracking-[0.2em] flex items-center justify-between">
                                     <span>Designer</span>
-                                    <FileUpload onFileLoaded={handleFile} />
+                                    {/* FileUpload is now minimal text, maybe put it below? Or keep it here but it's large. 
+                                        Let's keep FileUpload prominent for now. */}
                                 </h3>
 
-                                <div className="mb-6 p-2 bg-gradient-to-r from-black/60 to-transparent rounded-lg border border-white/5">
-                                    <DesignerToolbar
-                                        onAddRect={handleAddRect}
-                                        onAddCircle={handleAddCircle}
-                                        onAddText={handleAddText}
-                                    />
-                                    <div className="h-px bg-white/10 my-2"></div>
-                                    <button onClick={handleDeleteObject} className="w-full py-1 text-xs text-red-500 hover:text-red-400 hover:bg-red-900/10 rounded transition-colors flex items-center justify-center gap-2">
-                                        <span>🗑️</span> Delete Selection
-                                    </button>
+                                <FileUpload onFileLoaded={handleFile} />
+
+                                <div className="mb-4 mt-4 p-2 bg-gradient-to-r from-black/60 to-transparent rounded-lg border border-white/5">
+                                    <div className="flex justify-between items-center mb-2">
+                                        <DesignerToolbar
+                                            onAddRect={handleAddRect}
+                                            onAddCircle={handleAddCircle}
+                                            onAddText={handleAddText}
+                                        />
+                                        <button onClick={handleDeleteObject} className="text-xs text-red-500 hover:text-red-400 hover:bg-red-900/10 px-2 py-1 rounded transition-colors flex items-center gap-1">
+                                            <span className="text-lg">🗑️</span>
+                                        </button>
+                                    </div>
+
+                                    {/* Properties Panel for Selected Object */}
+                                    {objects.find(o => o.selected) && (
+                                        <div className="mt-2 pt-2 border-t border-white/10 animate-in fade-in slide-in-from-top-1">
+                                            <ObjectProperties
+                                                object={objects.find(o => o.selected)!}
+                                                onUpdate={handleUpdateObject}
+                                            />
+                                        </div>
+                                    )}
                                 </div>
 
                                 <h3 className="text-green-400 font-bold mb-4 uppercase text-[10px] tracking-[0.2em]">Operations</h3>
@@ -414,32 +461,6 @@ const CamPanel: React.FC<CamPanelProps> = ({ onGenerate }) => {
                     {activeTab === 'cnc' && <CncPanel onGenerate={onGenerate} />}
                     {activeTab === 'materials' && <MaterialsPanel onSelect={applyMaterial} />}
                     {activeTab === 'generator' && <TestGeneratorPanel onGenerate={handleTestGenerate} />}
-                </div>
-            </div>
-
-            {/* 3. Visualizer / Preview (Right, Resizable/Flex) */}
-            <div className="flex-1 bg-gradient-to-b from-gray-900 via-gray-900 to-black relative overflow-hidden shadow-inner">
-                <div className="absolute inset-0 bg-[url('/grid.svg')] opacity-10 pointer-events-none"></div>
-
-                {/* Toolbar / Header for Visualizer */}
-                <div className="absolute top-4 left-4 right-4 z-10 flex justify-between items-start pointer-events-none">
-                    <div className="bg-black/60 backdrop-blur rounded-lg px-3 py-1 border border-white/10 pointer-events-auto">
-                        <span className="text-xs text-gray-400 font-mono">
-                            {objects.length > 0 ? `${objects.length} Objects` : 'Empty Workspace'}
-                        </span>
-                    </div>
-                </div>
-
-                <div className="w-full h-full flex items-center justify-center">
-                    {gcode ? (
-                        <GcodePreview gcode={gcode} />
-                    ) : (
-                        <div className="text-center opacity-30 select-none">
-                            <div className="text-6xl mb-4">📐</div>
-                            <h2 className="text-xl font-light text-gray-400">Workspace Ready</h2>
-                            <p className="text-sm text-gray-600 mt-2">Import a vector or create a shape to begin</p>
-                        </div>
-                    )}
                 </div>
             </div>
         </div>

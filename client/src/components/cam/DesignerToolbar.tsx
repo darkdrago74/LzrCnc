@@ -1,16 +1,6 @@
 import React, { useState } from 'react';
 import { Square, Circle, Type, Move, RotateCcw } from 'lucide-react';
-
-export interface SceneObject {
-    id: string;
-    name: string;
-    type: 'file' | 'rect' | 'circle' | 'text' | 'stl';
-    content: string; // SVG string, DXF string, or URL
-    position: [number, number, number];
-    rotation: [number, number, number];
-    scale: [number, number, number];
-    selected?: boolean;
-}
+import type { SceneObject } from '../../types';
 
 interface DesignerToolbarProps {
     onAddRect: () => void;

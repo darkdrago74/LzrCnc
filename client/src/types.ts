@@ -98,3 +98,14 @@ export interface RasterOptions {
     scanlineDirection?: 'horizontal' | 'vertical' | 'diagonal';
     mode: 'grayscale' | 'bw' | 'dither';
 }
+
+export interface SceneObject {
+    id: string;
+    name: string;
+    type: 'file' | 'rect' | 'circle' | 'text' | 'stl';
+    content: string; // SVG string, DXF string, or URL
+    position: [number, number, number];
+    rotation: [number, number, number];
+    scale: [number, number, number];
+    selected?: boolean;
+}

@@ -57,15 +57,32 @@ export const LaserOperationStack: React.FC<Props> = ({ operations, onChange, onS
         <div className="bg-white/5 rounded p-4">
             <h3 className="text-lg font-bold mb-4 text-white">Operations</h3>
 
-            <div className="flex gap-2 mb-4">
-                <button onClick={() => addOperation('raster')} className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 rounded text-sm">
-                    + Raster
+            <div className="grid grid-cols-3 gap-2 mb-4">
+                <button
+                    onClick={() => addOperation('raster')}
+                    className="flex flex-col items-center justify-center p-3 bg-gradient-to-br from-blue-900/30 to-blue-800/30 hover:from-blue-800/50 hover:to-blue-700/50 border border-blue-500/20 rounded-lg transition-all text-blue-200 hover:text-blue-100 group shadow-lg"
+                    title="Add Raster/Engrave Layer"
+                >
+                    <span className="text-xl mb-1 opacity-70 group-hover:opacity-100 group-hover:scale-110 transition-transform">▒</span>
+                    <span className="text-[10px] uppercase font-bold tracking-wider">Raster</span>
                 </button>
-                <button onClick={() => addOperation('vector_cut')} className="bg-red-600 hover:bg-red-500 text-white px-3 py-1 rounded text-sm">
-                    + Cut
+
+                <button
+                    onClick={() => addOperation('vector_cut')}
+                    className="flex flex-col items-center justify-center p-3 bg-gradient-to-br from-red-900/30 to-red-800/30 hover:from-red-800/50 hover:to-red-700/50 border border-red-500/20 rounded-lg transition-all text-red-200 hover:text-red-100 group shadow-lg"
+                    title="Add Cut Layer"
+                >
+                    <span className="text-xl mb-1 opacity-70 group-hover:opacity-100 group-hover:scale-110 transition-transform">✂️</span>
+                    <span className="text-[10px] uppercase font-bold tracking-wider">Cut</span>
                 </button>
-                <button onClick={() => addOperation('vector_engrave')} className="bg-green-600 hover:bg-green-500 text-white px-3 py-1 rounded text-sm">
-                    + Vector
+
+                <button
+                    onClick={() => addOperation('vector_engrave')}
+                    className="flex flex-col items-center justify-center p-3 bg-gradient-to-br from-green-900/30 to-green-800/30 hover:from-green-800/50 hover:to-green-700/50 border border-green-500/20 rounded-lg transition-all text-green-200 hover:text-green-100 group shadow-lg"
+                    title="Add Vector Path Layer"
+                >
+                    <span className="text-xl mb-1 opacity-70 group-hover:opacity-100 group-hover:scale-110 transition-transform">✏️</span>
+                    <span className="text-[10px] uppercase font-bold tracking-wider">Vector</span>
                 </button>
             </div>
 

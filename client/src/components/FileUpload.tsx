@@ -5,46 +5,54 @@ interface FileUploadProps {
 }
 
 const FileUpload: React.FC<FileUploadProps> = ({ onFileLoaded }) => {
+    const fileInputRef = React.useRef<HTMLInputElement>(null);
+
+    const processFile = useCallback((file: File) => {
+        const reader = new FileReader();
+
+        if (file.type.includes('svg')) {
+            reader.onload = (event) => {
+                const content = event.target?.result as string;
+                onFileLoaded(file.name, content, 'vector');
+            };
+            reader.readAsText(file);
+        } else if (file.type.includes('image')) {
+            // Raster handling
+            console.warn("Raster upload not fully implemented yet");
+            onFileLoaded(file.name, file, 'raster');
+        }
+    }, [onFileLoaded]);
+
     const handleDrop = useCallback((e: React.DragEvent) => {
         e.preventDefault();
         e.stopPropagation();
 
         if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-            const file = e.dataTransfer.files[0];
-            const reader = new FileReader();
-
-            if (file.type.includes('svg')) {
-                reader.onload = (event) => {
-                    const content = event.target?.result as string;
-                    onFileLoaded(file.name, content, 'vector');
-                };
-                reader.readAsText(file);
-            } else if (file.type.includes('image')) {
-                // For raster, we might pass the file element or base64.
-                // Backend needs path for sharp in current implementation?
-                // Wait, backend 'generateRaster' takes 'imagePath'.
-                // If we upload from browser, we need to UPLOAD it first or send base64.
-                // Current plan says: /upload end point TO BE ADDED.
-                // For now, let's assume we can pass base64 to generate? 
-                // Backend CamService uses sharp(imagePath). Sharp can take Buffer.
-                // So we should send file content as buffer/base64?
-                // Let's defer Raster upload implementation until backend supports upload or buffer.
-                // Focus on Vector (SVG string) for now.
-                console.warn("Raster upload not fully implemented yet");
-                onFileLoaded(file.name, file, 'raster'); // Just pass file for now
-            }
+            processFile(e.dataTransfer.files[0]);
         }
-    }, [onFileLoaded]);
+    }, [processFile]);
 
     const handleDragOver = (e: React.DragEvent) => {
         e.preventDefault();
         e.stopPropagation();
     };
 
+    const handleClick = () => {
+        fileInputRef.current?.click();
+    };
+
+    const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+        if (e.target.files && e.target.files[0]) {
+            processFile(e.target.files[0]);
+        }
+    };
+
     return (
         <div
             onDrop={handleDrop}
             onDragOver={handleDragOver}
+            onClick={handleClick}
+            className="hover:bg-white/5 transition-colors"
             style={{
                 border: '2px dashed #666',
                 borderRadius: '8px',
@@ -55,7 +63,15 @@ const FileUpload: React.FC<FileUploadProps> = ({ onFileLoaded }) => {
                 marginBottom: '20px'
             }}
         >
+            <input
+                type="file"
+                ref={fileInputRef}
+                className="hidden"
+                accept=".svg,.jpg,.jpeg,.png,.bmp,.webp"
+                onChange={handleFileSelect}
+            />
             <p>Drag & Drop SVG or Image here</p>
+            <p className="text-xs mt-2 text-gray-500">(or click to browse)</p>
         </div>
     );
 };

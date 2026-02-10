@@ -179,6 +179,18 @@ function App() {
   const [activeTab, setActiveTab] = useState<string | null>('connection');
   const [laserBeamEnabled, setLaserBeamEnabled] = useState(true);
 
+  // State for CAM Objects (Lifted)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [objects, setObjects] = useState<any[]>([]);
+
+  // Dynamic Sidebar Width (Controlled by children like CamPanel)
+  const [sidebarWidth, setSidebarWidth] = useState(400);
+
+  // Reset width when tab changes
+  useEffect(() => {
+    setSidebarWidth(400);
+  }, [activeTab]);
+
   // Refactor: Mapping activeTab to SidePane Content
   const renderSidePane = () => {
     switch (activeTab) {
@@ -199,7 +211,12 @@ function App() {
           </div>
         );
       case 'cam':
-        return <CamPanel onGenerate={handleGcodeGenerated} />;
+        return <CamPanel
+          onGenerate={handleGcodeGenerated}
+          objects={objects}
+          setObjects={setObjects}
+          setSidebarWidth={setSidebarWidth}
+        />;
       case 'gcode':
         return (
           <div className="h-full flex flex-col">
@@ -248,7 +265,10 @@ function App() {
 
       {/* 2. Side Pane (Expandable) */}
       {activeTab && (
-        <div className="w-[400px] border-r border-white/10 bg-[#1e293b]/50 backdrop-blur-md flex flex-col transition-all duration-300 z-40 shadow-2xl">
+        <div
+          className="border-r border-white/10 bg-[#1e293b]/50 backdrop-blur-md flex flex-col transition-all duration-300 z-40 shadow-2xl"
+          style={{ width: sidebarWidth }}
+        >
           <div className="p-4 border-b border-white/5 flex justify-between items-center">
             <h2 className="text-lg font-semibold text-white capitalize">{activeTab}</h2>
             <button onClick={() => setActiveTab(null)} className="text-gray-500 hover:text-white">✕</button>
@@ -290,6 +310,13 @@ function App() {
             gcode={gcode}
             laserBeamEnabled={laserBeamEnabled}
             machineSettings={draftSettings || status.machineSettings}
+            objects={objects}
+            onSelectObject={(id) => {
+              setObjects(prev => prev.map(o => ({ ...o, selected: o.id === id })));
+            }}
+            onObjectUpdate={(id: string, updates: any) => {
+              setObjects(objs => objs.map(o => o.id === id ? { ...o, ...updates } : o));
+            }}
           />
         )}
 
