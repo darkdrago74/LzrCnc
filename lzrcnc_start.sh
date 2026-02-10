@@ -3,7 +3,7 @@
 
 # Hardcoded Project Path
 PROJECT_DIR="/home/roro/Documents/LzrCnc"
-PORT=3000
+PORT=3001
 HEALTH_URL="http://localhost:$PORT/ping"
 
 # Ensure tools are available
@@ -14,42 +14,23 @@ fi
 
 cd "$PROJECT_DIR" || { echo "Error: Project directory not found."; exit 1; }
 
-# Check if Port 3000 is in use
-PID=$(lsof -t -i:$PORT -sTCP:LISTEN)
+# Function to check and free a port
+check_and_free_port() {
+    local target_port=$1
+    local pid=$(lsof -t -i:$target_port -sTCP:LISTEN)
 
-if [ -n "$PID" ]; then
-    echo "Port $PORT is currently in use by PID $PID."
-    
-    echo "Checking server health..."
-    # Try to ping the server (timeout 2s)
-    HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 2 "$HEALTH_URL")
-    
-    if [ "$HTTP_STATUS" == "200" ]; then
-        echo "✅ Server is already running and HEALTHY (PID $PID)."
-        echo "Access it at: http://localhost:$PORT"
-        
-        # Interactive Prompt
-        read -p "Do you want to STOP this instance and START a fresh one? (y/N): " choice
-        case "$choice" in 
-          y|Y ) 
-            echo "Stopping existing server (PID $PID)..."
-            kill -9 "$PID"
-            sleep 1
-            echo "Previous instance stopped."
-            ;;
-          * ) 
-            echo "Keeping existing server running."
-            exit 0
-            ;;
-        esac
-    else
-        echo "⚠️  Server is unresponsive (Status: $HTTP_STATUS). It might be a zombie process."
-        echo "Attempting to clean up..."
-        kill -9 "$PID"
+    if [ -n "$pid" ]; then
+        echo "Port $target_port is in use by PID $pid."
+        # Auto-kill for consistency with Windows "Smart Start"
+        echo "Auto-killing blocking process (PID $pid)..."
+        kill -9 "$pid"
         sleep 1
-        echo "Cleanup complete. Starting new instance..."
     fi
-fi
+}
+
+echo "Checking ports..."
+check_and_free_port 3000
+check_and_free_port 3001
 
 echo "Starting LzrCnc Server..."
 npm start

@@ -37,3 +37,7 @@ client/dist_trash/
 server/dist/
 server/dist_trash/
 dumbinitgit.shdata/
+dumbinitgit.bat
+dumbinitgit.sh
+install.bat
+start.bat

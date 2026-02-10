@@ -13,7 +13,7 @@ import type { CamOperation } from './cam/interfaces';
 import { DesignerToolbar } from './cam/DesignerToolbar';
 import { HelpIcon } from './ui/Tooltip';
 import { ObjectProperties } from './cam/ObjectProperties';
-import { ChevronRight, ChevronLeft } from 'lucide-react';
+import { ChevronRight, ChevronLeft, Zap, Wrench, Library, FlaskConical, Trash2, Save, Play } from 'lucide-react';
 import type { SceneObject } from '../types';
 // Simple random ID generator (avoiding uuid dep)
 const uuidv4 = () => Math.random().toString(36).substring(2, 10);
@@ -46,14 +46,38 @@ const CamPanel: React.FC<CamPanelProps> = ({ onGenerate, objects, setObjects, se
 
     // Sync Sidebar Width with App.tsx
     React.useEffect(() => {
-        // Nav (64px) + Panel (450 or 700)
-        // Wait, the Nav is inside CamPanel.
-        // So total width = 64 + (isExpanded ? 700 : 450)
-        // Actually, let's make the panel content itself 450/700.
         const navWidth = 64;
-        const contentWidth = isExpanded ? 700 : 450;
-        setSidebarWidth(navWidth + contentWidth);
+
+        const updateWidth = () => {
+            if (isExpanded) {
+                // Adaptive Mode
+                const screenWidth = window.innerWidth;
+                const idealWidth = screenWidth * 0.40; // Aim for 40%
+
+                // Constraints: Min 350px (usable), Max 900px (too wide)
+                const clamped = Math.min(Math.max(idealWidth, 350), 900);
+
+                // Hard Limit: Never exceed 50% of available screen space (minus nav)
+                const finalWidth = Math.min(clamped, (screenWidth - navWidth) * 0.5);
+
+                setSidebarWidth(finalWidth);
+            } else {
+                // Compact Mode
+                setSidebarWidth(navWidth + 400);
+            }
+        };
+
+        updateWidth();
+        window.addEventListener('resize', updateWidth);
+        return () => window.removeEventListener('resize', updateWidth);
     }, [isExpanded, setSidebarWidth]);
+
+    const items = [
+        { id: 'laser', icon: Zap, label: 'Laser' },
+        { id: 'cnc', icon: Wrench, label: 'CNC' },
+        { id: 'materials', icon: Library, label: 'Lib' },
+        { id: 'generator', icon: FlaskConical, label: 'Test' },
+    ];
 
     const addObject = (type: SceneObject['type'], content: string) => {
         const newObj: SceneObject = {
@@ -183,7 +207,8 @@ const CamPanel: React.FC<CamPanelProps> = ({ onGenerate, objects, setObjects, se
 
         setLoading(true);
         try {
-            const response = await fetch('http://localhost:3000/cam/generate', {
+            const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+            const response = await fetch(`${apiUrl}/cam/generate`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -241,38 +266,26 @@ const CamPanel: React.FC<CamPanelProps> = ({ onGenerate, objects, setObjects, se
         <div className="flex h-full w-full bg-transparent text-gray-100">
             {/* 1. Vertical Navigation Sidebar (Leftmost) */}
             <div className="w-16 flex-none flex flex-col gap-4 border-r border-white/10 pr-2 pt-4 bg-black/40 items-center">
-                <button
-                    onClick={() => setActiveTab('laser')}
-                    className={`nav-btn p-3 rounded-lg flex flex-col items-center justify-center gap-1 transition-all link-hover ${activeTab === 'laser' ? 'bg-blue-600/20 text-blue-400 border border-blue-500/50 shadow-[0_0_15px_rgba(37,99,235,0.3)]' : 'text-gray-500 hover:text-gray-200 hover:bg-white/5'}`}
-                    title="Laser CAM"
-                >
-                    <span className="text-xl">⚡</span>
-                    <span className="text-[9px] font-bold uppercase tracking-wider">Laser</span>
-                </button>
-                <button
-                    onClick={() => setActiveTab('cnc')}
-                    className={`nav-btn p-3 rounded-lg flex flex-col items-center justify-center gap-1 transition-all link-hover ${activeTab === 'cnc' ? 'bg-orange-600/20 text-orange-400 border border-orange-500/50 shadow-[0_0_15px_rgba(234,88,12,0.3)]' : 'text-gray-500 hover:text-gray-200 hover:bg-white/5'}`}
-                    title="CNC Machining"
-                >
-                    <span className="text-xl">🔩</span>
-                    <span className="text-[9px] font-bold uppercase tracking-wider">CNC</span>
-                </button>
-                <button
-                    onClick={() => setActiveTab('materials')}
-                    className={`nav-btn p-3 rounded-lg flex flex-col items-center justify-center gap-1 transition-all link-hover ${activeTab === 'materials' ? 'bg-white/10 text-white border border-white/20' : 'text-gray-500 hover:text-gray-200 hover:bg-white/5'}`}
-                    title="Library"
-                >
-                    <span className="text-xl">📚</span>
-                    <span className="text-[9px] font-bold uppercase tracking-wider">Lib</span>
-                </button>
-                <button
-                    onClick={() => setActiveTab('generator')}
-                    className={`nav-btn p-3 rounded-lg flex flex-col items-center justify-center gap-1 transition-all link-hover ${activeTab === 'generator' ? 'bg-white/10 text-white border border-white/20' : 'text-gray-500 hover:text-gray-200 hover:bg-white/5'}`}
-                    title="Test Generator"
-                >
-                    <span className="text-xl">🧪</span>
-                    <span className="text-[9px] font-bold uppercase tracking-wider">Test</span>
-                </button>
+                {items.map((item) => (
+                    <button
+                        key={item.id}
+                        onClick={() => setActiveTab(item.id as any)}
+                        className={`
+                            nav-btn w-12 h-12 rounded-xl flex flex-col items-center justify-center gap-1 transition-all duration-200 group relative
+                            ${activeTab === item.id
+                                ? 'bg-blue-600/20 text-blue-400 shadow-[0_0_15px_rgba(37,99,235,0.3)] ring-1 ring-blue-500/50'
+                                : 'text-gray-500 hover:text-gray-200 hover:bg-white/5'}
+                        `}
+                        title={item.label}
+                    >
+                        <item.icon size={20} className={`transition-transform duration-300 ${activeTab === item.id ? 'scale-110' : 'group-hover:scale-110'}`} />
+                        <span className="text-[9px] font-bold uppercase tracking-wider opacity-80">{item.label}</span>
+
+                        {activeTab === item.id && (
+                            <div className="absolute left-0 top-1/2 -translate-y-1/2 h-6 w-[3px] bg-blue-500 rounded-r-full shadow-[0_0_8px_#3b82f6]"></div>
+                        )}
+                    </button>
+                ))}
             </div>
 
             {/* 2. Control Stack (Fills the Sidebar Width) */}
@@ -282,6 +295,7 @@ const CamPanel: React.FC<CamPanelProps> = ({ onGenerate, objects, setObjects, se
                     <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest pl-2">
                         {activeTab === 'laser' ? 'Laser CAM' : activeTab}
                     </span>
+                    {/* Hidden by user request (default adaptive width is correct)
                     <button
                         onClick={() => setIsExpanded(!isExpanded)}
                         className="ml-auto p-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-gray-400 hover:text-white transition-colors flex items-center justify-center shadow-sm"
@@ -289,6 +303,7 @@ const CamPanel: React.FC<CamPanelProps> = ({ onGenerate, objects, setObjects, se
                     >
                         {isExpanded ? <ChevronLeft size={14} /> : <ChevronRight size={14} />}
                     </button>
+                    */}
                 </div>
 
                 <div className="flex-1 overflow-y-auto p-4 space-y-6 scrollbar-hide relative">

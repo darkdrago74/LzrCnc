@@ -198,6 +198,7 @@ WorkingDirectory=$APP_DIR
 ExecStart=$NODE_PATH $APP_DIR/server/dist/index.js
 Restart=always
 Environment=NODE_ENV=production
+Environment=PORT=3000
 
 [Install]
 WantedBy=multi-user.target

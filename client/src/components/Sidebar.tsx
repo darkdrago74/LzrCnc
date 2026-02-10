@@ -19,7 +19,7 @@ export function Sidebar({ activeTab, onTabChange, connectionState }: SidebarProp
     ];
 
     return (
-        <div className="w-[64px] bg-[#0f172a] border-r border-white/10 flex flex-col items-center py-4 z-50">
+        <div className="w-[var(--sidebar-width)] bg-[var(--bg-color)] border-r border-[var(--panel-border)] flex flex-col items-center py-4 z-50">
             {/* Logo Area */}
             <div className="mb-8 p-2 bg-[var(--accent-color)] rounded-lg shadow-lg shadow-[rgba(6,182,212,0.4)]">
                 <Zap className="text-white" size={20} fill="currentColor" />
@@ -33,15 +33,15 @@ export function Sidebar({ activeTab, onTabChange, connectionState }: SidebarProp
                         onClick={() => onTabChange(activeTab === item.id ? null : item.id)}
                         disabled={item.disabled}
                         className={`
-              w-full h-[50px] flex items-center justify-center relative transition-all duration-200
-              ${activeTab === item.id ? 'text-[var(--accent-color)] bg-white/5 border-l-4 border-[var(--accent-color)]' : 'text-gray-400 hover:text-white hover:bg-white/5'}
+              w-full h-[50px] flex items-center justify-center relative transition-all duration-200 group
+              ${activeTab === item.id ? 'text-[var(--accent-color)] bg-white/5' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-white/5'}
               ${item.disabled ? 'opacity-30 cursor-not-allowed' : ''}
             `}
                         title={item.label}
                     >
-                        <item.icon size={24} />
+                        <item.icon size={24} className={`transition-transform duration-300 ${activeTab === item.id ? 'scale-110 drop-shadow-[0_0_8px_var(--accent-color)]' : 'group-hover:scale-110'}`} />
                         {activeTab === item.id && (
-                            <div className="absolute inset-y-0 right-0 w-px bg-[var(--accent-color)] shadow-[0_0_10px_var(--accent-color)]" />
+                            <div className="absolute inset-y-0 right-0 w-[2px] bg-[var(--accent-color)] shadow-[0_0_10px_var(--accent-color)]" />
                         )}
                     </button>
                 ))}

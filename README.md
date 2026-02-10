@@ -43,8 +43,15 @@ If you installed the global command, simply run:
 lzrcnc
 ```
 
--   **Smart Startup**: This script checks if port `3000` is free. If a frozen/zombie instance is blocking it, it will automatically clean it up and start a fresh instance.
 -   **Access**: Open your browser to `http://localhost:3000` or `http://<your-pi-ip>:3000`.
+
+### Windows Installation & Usage
+**Prerequisites**: Install [Node.js (v20+)](https://nodejs.org/) and [Git](https://git-scm.com/downloads).
+
+1.  **Install**: Double-click `install.bat` (or run it from cmd). This will install all dependencies.
+2.  **Start**: Double-click `start.bat`. This will launch the server and client.
+3.  **Git Helper**: Use `dumbinitgit.bat` for easy committing and pushing.
+
 
 ### Hardware Connection
 **GRBL**:

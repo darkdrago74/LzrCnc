@@ -12,7 +12,7 @@ import { Sidebar } from './components/Sidebar';
 import { BackgroundFX } from './components/BackgroundFX';
 import MachineSettingsPanel from './components/MachineSettingsPanel';
 
-const API_URL = import.meta.env.DEV ? 'http://localhost:3000' : '';
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
 function App() {
   const [status, setStatus] = useState<MachineStatus>({

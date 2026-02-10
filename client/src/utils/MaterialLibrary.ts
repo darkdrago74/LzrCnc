@@ -8,7 +8,7 @@ export interface MaterialPreset {
     description?: string;
 }
 
-const API_URL = 'http://localhost:3000/materials';
+const API_URL = (import.meta.env.VITE_API_URL || 'http://localhost:3001') + '/materials';
 
 export interface MaterialPreset {
     id: string;
