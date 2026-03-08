@@ -1,4 +1,4 @@
-# LzrCnc -Work ongoing, not functionql yet
+# LzrCnc -Work ongoing, not functional yet
 
 ![LzrCnc Logo](./LrzCnc%20logo.png)
 
