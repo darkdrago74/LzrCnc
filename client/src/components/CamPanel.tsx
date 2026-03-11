@@ -24,9 +24,10 @@ interface CamPanelProps {
     objects: SceneObject[];
     setObjects: React.Dispatch<React.SetStateAction<SceneObject[]>>;
     setSidebarWidth: (w: number) => void;
+    machineSettings?: any;
 }
 
-const CamPanel: React.FC<CamPanelProps> = ({ onGenerate, objects, setObjects, setSidebarWidth }) => {
+const CamPanel: React.FC<CamPanelProps> = ({ onGenerate, objects, setObjects, setSidebarWidth, machineSettings }) => {
     const [fileName, setFileName] = useState<string | null>(null);
     const [fileContent, setFileContent] = useState<string | null>(null);
     const [operations, setOperations] = useState<CamOperation[]>([]);
@@ -79,16 +80,41 @@ const CamPanel: React.FC<CamPanelProps> = ({ onGenerate, objects, setObjects, se
         { id: 'generator', icon: FlaskConical, label: 'Test' },
     ];
 
-    const addObject = (type: SceneObject['type'], content: string) => {
+    const addObject = (type: SceneObject['type'], content: string, nameOverride?: string) => {
+        // Calculate bed center for default placement
+        let centerX = 50;
+        let centerY = 50;
+
+        if (machineSettings?.workbench) {
+            const width = machineSettings.workbench.width || 200;
+            const height = machineSettings.workbench.height || 200;
+            const origin = machineSettings.workbench.origin || 'bottom-left';
+
+            if (origin === 'bottom-left') {
+                centerX = width / 2;
+                centerY = height / 2;
+            } else if (origin === 'bottom-right') {
+                centerX = -width / 2;
+                centerY = height / 2;
+            } else if (origin === 'top-right') {
+                centerX = -width / 2;
+                centerY = -height / 2;
+            } else if (origin === 'top-left') {
+                centerX = width / 2;
+                centerY = -height / 2;
+            }
+        }
+
         const newObj: SceneObject = {
             id: Math.random().toString(36).substr(2, 9),
-            name: `${type}_${objects.length + 1}`,
+            name: nameOverride || `${type}_${objects.length + 1}`,
             type,
             content,
-            position: [0, 0, 0], // Center?
+            position: [centerX, centerY, 0], // explicitly centered on spawn
             rotation: [0, 0, 0],
             scale: [1, 1, 1],
-            selected: true
+            selected: true,
+            gcodeOptions: type === 'gcode' ? { offsetX: 0, offsetY: 0, feedrateScale: 1.0, feedrateOverride: undefined } : undefined
         };
         // Deselect others
         const updated = objects.map(o => ({ ...o, selected: false }));
@@ -127,9 +153,19 @@ const CamPanel: React.FC<CamPanelProps> = ({ onGenerate, objects, setObjects, se
             };
             reader.readAsDataURL(content);
             // Handle blobs/files (STLs, Images)
-            if (name.endsWith('.stl')) {
-                const url = URL.createObjectURL(content as File);
-                addObject('stl', url);
+            const url = URL.createObjectURL(content as File);
+            if (name.toLowerCase().endsWith('.stl')) {
+                addObject('stl', url, name);
+            } else if (type === 'raster' || name.match(/\.(png|jpe?g|webp|bmp)$/i)) {
+                addObject('image', url, name);
+            } else if (type === 'gcode' as any) {
+                // Read content again text for G-Code
+                const textReader = new FileReader();
+                textReader.onload = (ev) => {
+                    setFileContent(ev.target?.result as string);
+                    addObject('gcode' as any, ev.target?.result as string, name);
+                };
+                textReader.readAsText(content as File);
             }
         }
 
@@ -231,6 +267,36 @@ const CamPanel: React.FC<CamPanelProps> = ({ onGenerate, objects, setObjects, se
             }
         } catch (e) {
             alert('Failed to generate: ' + (e as Error).message);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const applyGCodeModifications = async () => {
+        const gcodeObj = objects.find(o => o.type === 'gcode' && o.selected);
+        if (!gcodeObj) return;
+
+        setLoading(true);
+        try {
+            const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+            const response = await fetch(`${apiUrl}/cam/modify-gcode`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    fileContent: gcodeObj.content,
+                    options: gcodeObj.gcodeOptions
+                })
+            });
+
+            const data = await response.json();
+            if (data.status === 'success') {
+                setGcode(data.gcode);
+                onGenerate(data.gcode);
+            } else {
+                alert('G-Code Modification Error: ' + data.error);
+            }
+        } catch (e) {
+            alert('Failed to modify G-Code: ' + (e as Error).message);
         } finally {
             setLoading(false);
         }
@@ -401,13 +467,102 @@ const CamPanel: React.FC<CamPanelProps> = ({ onGenerate, objects, setObjects, se
                                         </button>
                                     </div>
 
+                                    {/* Object List (Orca-Style) */}
+                                    {objects.length > 0 && (
+                                        <div className="mb-2 max-h-40 overflow-y-auto bg-black/40 rounded border border-white/5 p-1">
+                                            {objects.map(obj => (
+                                                <div
+                                                    key={obj.id}
+                                                    onClick={() => handleSelectObject(obj.id)}
+                                                    className={`cursor-pointer px-2 py-1.5 flex items-center justify-between rounded text-xs transition-colors mb-1 ${obj.selected ? 'bg-blue-600/50 border border-blue-500/50' : 'hover:bg-white/10'}`}
+                                                >
+                                                    <div className="flex items-center gap-2 truncate">
+                                                        <span className="opacity-50 text-[10px] uppercase w-10 shrink-0">{obj.type}</span>
+                                                        <span className="truncate">{obj.name}</span>
+                                                    </div>
+                                                    <div className="text-[10px] opacity-40">
+                                                        [{(obj.position[0] ?? 0).toFixed(0)}, {(obj.position[1] ?? 0).toFixed(0)}]
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+
                                     {/* Properties Panel for Selected Object */}
-                                    {objects.find(o => o.selected) && (
+                                    {objects.find(o => o.selected) && objects.find(o => o.selected)?.type !== 'gcode' && (
                                         <div className="mt-2 pt-2 border-t border-white/10 animate-in fade-in slide-in-from-top-1">
                                             <ObjectProperties
                                                 object={objects.find(o => o.selected)!}
                                                 onUpdate={handleUpdateObject}
                                             />
+                                        </div>
+                                    )}
+
+                                    {objects.find(o => o.selected && o.type === 'gcode') && (
+                                        <div className="mt-2 pt-2 border-t border-white/10 animate-in fade-in slide-in-from-top-1 bg-black/30 p-3 rounded">
+                                            <h4 className="text-gray-400 text-[10px] uppercase font-bold mb-2 flex items-center gap-2">
+                                                <span>Imported G-Code Properties</span>
+                                            </h4>
+                                            <div className="grid grid-cols-2 gap-x-4 gap-y-2 mb-3">
+                                                <div>
+                                                    <label className="text-gray-500 text-[10px] uppercase mb-1 block">Offset X</label>
+                                                    <input
+                                                        type="number"
+                                                        className="w-full bg-black/50 border border-white/10 rounded px-2 py-1 text-xs text-white"
+                                                        value={objects.find(o => o.selected)?.gcodeOptions?.offsetX || 0}
+                                                        onChange={(e) => {
+                                                            const obj = objects.find(o => o.selected)!;
+                                                            handleUpdateObject(obj.id, { gcodeOptions: { ...obj.gcodeOptions!, offsetX: parseFloat(e.target.value) || 0 } });
+                                                        }}
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <label className="text-gray-500 text-[10px] uppercase mb-1 block">Offset Y</label>
+                                                    <input
+                                                        type="number"
+                                                        className="w-full bg-black/50 border border-white/10 rounded px-2 py-1 text-xs text-white"
+                                                        value={objects.find(o => o.selected)?.gcodeOptions?.offsetY || 0}
+                                                        onChange={(e) => {
+                                                            const obj = objects.find(o => o.selected)!;
+                                                            handleUpdateObject(obj.id, { gcodeOptions: { ...obj.gcodeOptions!, offsetY: parseFloat(e.target.value) || 0 } });
+                                                        }}
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <label className="text-gray-500 text-[10px] uppercase mb-1 block">Feedrate Scale</label>
+                                                    <input
+                                                        type="number"
+                                                        step="0.1"
+                                                        className="w-full bg-black/50 border border-white/10 rounded px-2 py-1 text-xs text-white"
+                                                        value={objects.find(o => o.selected)?.gcodeOptions?.feedrateScale || 1.0}
+                                                        onChange={(e) => {
+                                                            const obj = objects.find(o => o.selected)!;
+                                                            handleUpdateObject(obj.id, { gcodeOptions: { ...obj.gcodeOptions!, feedrateScale: parseFloat(e.target.value) || 1.0 } });
+                                                        }}
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <label className="text-gray-500 text-[10px] uppercase mb-1 block">Override F</label>
+                                                    <input
+                                                        type="number"
+                                                        placeholder="e.g. 500"
+                                                        className="w-full bg-black/50 border border-white/10 rounded px-2 py-1 text-xs text-white"
+                                                        value={objects.find(o => o.selected)?.gcodeOptions?.feedrateOverride || ''}
+                                                        onChange={(e) => {
+                                                            const obj = objects.find(o => o.selected)!;
+                                                            const val = e.target.value ? parseFloat(e.target.value) : undefined;
+                                                            handleUpdateObject(obj.id, { gcodeOptions: { ...obj.gcodeOptions!, feedrateOverride: val } });
+                                                        }}
+                                                    />
+                                                </div>
+                                            </div>
+                                            <button
+                                                onClick={applyGCodeModifications}
+                                                disabled={loading}
+                                                className="w-full py-2 bg-blue-600/30 hover:bg-blue-600/50 text-blue-300 rounded text-xs font-bold transition-colors"
+                                            >
+                                                {loading ? 'Processing...' : 'Apply & Generate Output'}
+                                            </button>
                                         </div>
                                     )}
                                 </div>

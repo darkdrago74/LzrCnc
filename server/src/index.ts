@@ -151,6 +151,23 @@ server.get('/status', async (request, reply) => {
     return { ...status, ip: getNetworkIp(), machineSettings: settings };
 });
 
+const { AIGcodeOptimizer } = require('./cam/processors/AIGcodeOptimizer');
+const aiOptimizer = new AIGcodeOptimizer();
+
+server.post('/api/ai/optimize-path', async (request: any, reply) => {
+    try {
+        const { gcode } = request.body;
+        if (!gcode) return reply.code(400).send({ error: 'No G-code provided' });
+
+        // Use the placeholder AI optimizer
+        const optimized = await aiOptimizer.optimize(gcode);
+        return { status: 'success', optimizedGcode: optimized };
+    } catch (err: any) {
+        server.log.error(err);
+        return reply.code(500).send({ error: err.message });
+    }
+});
+
 const start = async () => {
     try {
         const port = Number(process.env.PORT) || 3001;

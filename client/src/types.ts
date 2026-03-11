@@ -102,10 +102,16 @@ export interface RasterOptions {
 export interface SceneObject {
     id: string;
     name: string;
-    type: 'file' | 'rect' | 'circle' | 'text' | 'stl';
+    type: 'file' | 'rect' | 'circle' | 'text' | 'stl' | 'gcode' | 'image';
     content: string; // SVG string, DXF string, or URL
     position: [number, number, number];
     rotation: [number, number, number];
     scale: [number, number, number];
     selected?: boolean;
+    gcodeOptions?: {
+        offsetX: number;
+        offsetY: number;
+        feedrateScale: number;
+        feedrateOverride?: number;
+    };
 }

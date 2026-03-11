@@ -10,13 +10,40 @@ const FileUpload: React.FC<FileUploadProps> = ({ onFileLoaded }) => {
     const processFile = useCallback((file: File) => {
         const reader = new FileReader();
 
-        if (file.type.includes('svg')) {
+        if (file.type.includes('svg') || file.name.toLowerCase().endsWith('.svg')) {
             reader.onload = (event) => {
                 const content = event.target?.result as string;
                 onFileLoaded(file.name, content, 'vector');
             };
             reader.readAsText(file);
-        } else if (file.type.includes('image')) {
+        } else if (file.name.toLowerCase().endsWith('.dxf')) {
+            reader.onload = async (event) => {
+                const content = event.target?.result as string;
+                try {
+                    const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+                    const response = await fetch(`${apiUrl}/cam/parse-dxf`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ fileContent: content })
+                    });
+                    const data = await response.json();
+                    if (data.status === 'success') {
+                        onFileLoaded(file.name, data.svg, 'vector');
+                    } else {
+                        alert('DXF Parse Error: ' + data.error);
+                    }
+                } catch (e: any) {
+                    alert('Failed to parse DXF: ' + e.message);
+                }
+            };
+            reader.readAsDataURL(file);
+        } else if (file.name.toLowerCase().endsWith('.gcode') || file.name.toLowerCase().endsWith('.nc')) {
+            reader.onload = (event) => {
+                const content = event.target?.result as string;
+                onFileLoaded(file.name, content, 'gcode' as any); // Use 'gcode' as custom type
+            };
+            reader.readAsText(file);
+        } else if (file.type.includes('image') || file.name.match(/\.(png|jpe?g|webp|bmp)$/i)) {
             // Raster handling
             console.warn("Raster upload not fully implemented yet");
             onFileLoaded(file.name, file, 'raster');
@@ -67,10 +94,10 @@ const FileUpload: React.FC<FileUploadProps> = ({ onFileLoaded }) => {
                 type="file"
                 ref={fileInputRef}
                 className="hidden"
-                accept=".svg,.jpg,.jpeg,.png,.bmp,.webp"
+                accept=".gcode,.nc,.dxf,.svg,.jpg,.jpeg,.png,.bmp,.webp"
                 onChange={handleFileSelect}
             />
-            <p>Drag & Drop SVG or Image here</p>
+            <p>Drag & Drop G-Code, DXF, SVG, or Image</p>
             <p className="text-xs mt-2 text-gray-500">(or click to browse)</p>
         </div>
     );

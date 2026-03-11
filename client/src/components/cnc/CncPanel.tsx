@@ -6,9 +6,10 @@ import { parseGcodeBounds } from '../../utils/gcodeUtils';
 
 interface CncPanelProps {
     onGenerate: (gcode: string) => void;
+    onCommand?: (cmd: string) => void;
 }
 
-export const CncPanel: React.FC<CncPanelProps> = ({ onGenerate }) => {
+export const CncPanel: React.FC<CncPanelProps> = ({ onGenerate, onCommand }) => {
     const [subTab, setSubTab] = useState<'setup' | '2.5d' | '3d'>('setup');
     const [gcode, setGcode] = useState<string>('');
     const [autoCenter, setAutoCenter] = useState(true);

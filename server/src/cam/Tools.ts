@@ -38,6 +38,10 @@ export interface VectorOptions {
     // Z-Height Control
     workingZ?: number;
     safeZ?: number;
+
+    // Vector Pathing
+    cutSide?: 'on' | 'inside' | 'outside';
+    pocket?: boolean;
 }
 
 export interface RasterOptions {

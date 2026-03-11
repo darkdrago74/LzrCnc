@@ -1,6 +1,7 @@
 import React, { useMemo, forwardRef } from 'react';
 import * as THREE from 'three';
 import { useLoader } from '@react-three/fiber';
+import { Edges } from '@react-three/drei';
 import type { SceneObject } from '../../types';
 
 const ObjectRenderer = forwardRef<THREE.Group, { object: SceneObject; selected: boolean; onSelect: () => void }>(({ object, selected, onSelect }, ref) => {
@@ -42,9 +43,10 @@ const ObjectRenderer = forwardRef<THREE.Group, { object: SceneObject; selected: 
 
             {/* Selection Highlight */}
             {selected && (
-                <mesh>
-                    <boxGeometry args={[width, height, 1]} />
-                    <meshBasicMaterial wireframe color="#FFFF00" />
+                <mesh position={[0, 0, 0.1]}>
+                    <planeGeometry args={[width, height]} />
+                    <meshBasicMaterial color="#3b82f6" transparent opacity={0.2} side={THREE.DoubleSide} depthTest={false} />
+                    <Edges scale={1.0} color="#3b82f6" />
                 </mesh>
             )}
 

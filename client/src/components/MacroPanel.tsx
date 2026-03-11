@@ -155,6 +155,51 @@ const MacroPanel: React.FC<MacroPanelProps> = ({ status, hasGcode, onCommand, on
                         </button>
                     </div>
 
+                    <div className="col-span-2 bg-black/20 p-2 rounded border border-white/5 space-y-2 mt-2">
+                        <div className="flex items-center justify-between text-xs text-gray-400 gap-2 mb-1">
+                            <span>Custom Macros</span>
+                        </div>
+                        <div className="grid grid-cols-3 gap-2">
+                            <button
+                                onClick={() => onCommand('$$')}
+                                className="p-1.5 bg-gray-800/50 hover:bg-gray-700 text-gray-300 rounded text-xs border border-gray-600/30 transition-colors"
+                            >
+                                $$ (Settings)
+                            </button>
+                            <button
+                                onClick={() => onCommand('$I')}
+                                className="p-1.5 bg-gray-800/50 hover:bg-gray-700 text-gray-300 rounded text-xs border border-gray-600/30 transition-colors"
+                            >
+                                $I (Build Info)
+                            </button>
+                            <button
+                                onClick={() => onCommand('G0 X0 Y0')}
+                                className="p-1.5 bg-gray-800/50 hover:bg-gray-700 text-gray-300 rounded text-xs border border-gray-600/30 transition-colors"
+                            >
+                                Go to Origin
+                            </button>
+                            <button
+                                onClick={() => onCommand('G92 X0 Y0 Z0')}
+                                className="p-1.5 bg-gray-800/50 hover:bg-gray-700 text-gray-300 rounded text-xs border border-gray-600/30 transition-colors"
+                            >
+                                Set Zero (G92)
+                            </button>
+                            <button
+                                onClick={() => onCommand('$SLP')}
+                                className="p-1.5 bg-gray-800/50 hover:bg-gray-700 text-gray-300 rounded text-xs border border-gray-600/30 transition-colors"
+                            >
+                                Sleep ($SLP)
+                            </button>
+                            <button
+                                onClick={() => onCommand('\x18')}
+                                className="p-1.5 bg-red-900/50 hover:bg-red-800 text-red-300 rounded text-xs border border-red-700/50 transition-colors"
+                                title="Ctrl+X (Soft Reset)"
+                            >
+                                Soft Reset
+                            </button>
+                        </div>
+                    </div>
+
                     <button
                         onClick={() => setShowProbe(!showProbe)}
                         className="col-span-2 flex items-center justify-center gap-2 p-2 bg-purple-900/30 hover:bg-purple-900/50 text-purple-200 rounded border border-purple-800/50 transition-colors mt-2"

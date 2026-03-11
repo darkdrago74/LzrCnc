@@ -216,6 +216,7 @@ function App() {
           objects={objects}
           setObjects={setObjects}
           setSidebarWidth={setSidebarWidth}
+          machineSettings={draftSettings || status.machineSettings}
         />;
       case 'gcode':
         return (
@@ -321,11 +322,11 @@ function App() {
         )}
 
         {/* Overlay Status Bar */}
-        <div className="absolute top-4 right-4 flex gap-4 pointer-events-none">
+        <div className="absolute top-4 right-[50px] flex gap-4 pointer-events-none">
           <div className="glass-panel px-4 py-2 flex items-center gap-2 pointer-events-auto">
             <Activity size={16} className={status.state !== 'Disconnected' ? "text-green-400" : "text-gray-500"} />
-            <span className="font-mono font-bold">{status.state}</span>
-            <span className="text-sm text-gray-400">
+            <span className="font-mono font-bold mr-2 whitespace-nowrap">{status.state}</span>
+            <span className="text-sm text-gray-400 whitespace-nowrap">
               X:{status.pos.x.toFixed(1)} Y:{status.pos.y.toFixed(1)} Z:{status.pos.z.toFixed(1)}
             </span>
           </div>

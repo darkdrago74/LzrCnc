@@ -1,8 +1,12 @@
 import { FastifyInstance } from 'fastify';
 import { CamService } from '../cam/CamService.js';
+import { DxfConverter } from '../cam/processors/DxfConverter.js';
+import { GCodeModifier } from '../cam/processors/GCodeModifier.js';
 
 export default async function camRoutes(server: FastifyInstance) {
     const camService = new CamService();
+    const dxfConverter = new DxfConverter();
+    const gcodeModifier = new GCodeModifier();
 
     server.post('/cam/generate', async (request: any, reply) => {
         const { fileContent, filePath, fileName, operations, options } = request.body;
@@ -69,5 +73,41 @@ export default async function camRoutes(server: FastifyInstance) {
 
     server.get('/cam/validate', async () => {
         return { status: 'ok', modules: ['vector', 'raster'] };
+    });
+
+    server.post('/cam/parse-dxf', async (request: any, reply) => {
+        try {
+            const { fileContent } = request.body;
+            if (!fileContent) {
+                return reply.code(400).send({ error: 'No DXF content provided' });
+            }
+
+            // If it comes with a data URI prefix, remove it
+            let rawContent = fileContent;
+            if (rawContent.startsWith('data:')) {
+                const base64Data = rawContent.split(';base64,').pop();
+                rawContent = Buffer.from(base64Data, 'base64').toString('utf8');
+            }
+
+            const svg = await dxfConverter.convertToSvg(rawContent);
+            return { status: 'success', svg };
+        } catch (err: any) {
+            server.log.error(err);
+            return reply.code(500).send({ error: err.message });
+        }
+    });
+
+    server.post('/cam/modify-gcode', async (request: any, reply) => {
+        try {
+            const { fileContent, options } = request.body;
+            if (!fileContent) {
+                return reply.code(400).send({ error: 'No G-Code content provided' });
+            }
+            const modified = gcodeModifier.modify(fileContent, options || {});
+            return { status: 'success', gcode: modified };
+        } catch (err: any) {
+            server.log.error(err);
+            return reply.code(500).send({ error: err.message });
+        }
     });
 }
