@@ -14,6 +14,36 @@ export const ConnectionPanel: React.FC<ConnectionPanelProps> = ({ status, onConn
     const [port, setPort] = useState('/dev/ttyUSB0');
     const [baud, setBaud] = useState(115200);
     const [host, setHost] = useState('192.168.1.100');
+    const [availablePorts, setAvailablePorts] = useState<string[]>([]);
+    const [isLoadingPorts, setIsLoadingPorts] = useState(false);
+
+    const fetchPorts = async () => {
+        setIsLoadingPorts(true);
+        try {
+            const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+            const res = await fetch(`${API_URL}/api/ports`);
+            if (res.ok) {
+                const data = await res.json();
+                if (data.ports && data.ports.length > 0) {
+                    setAvailablePorts(data.ports);
+                    // Only auto-select if current port is not in the new list or empty
+                    if (!data.ports.includes(port)) {
+                        setPort(data.ports[0]);
+                    }
+                } else {
+                    setAvailablePorts([]);
+                }
+            }
+        } catch (err) {
+            console.error('Failed to fetch ports', err);
+        } finally {
+            setIsLoadingPorts(false);
+        }
+    };
+
+    React.useEffect(() => {
+        fetchPorts();
+    }, []);
 
     const isConnected = status.state !== 'Disconnected';
 
@@ -54,15 +84,46 @@ export const ConnectionPanel: React.FC<ConnectionPanelProps> = ({ status, onConn
                     <>
                         <div>
                             <label className="label">Serial Port</label>
-                            <div className="flex items-center gap-2 bg-[rgba(15,23,42,0.5)] rounded-md px-2 border border-[var(--border-color)]">
-                                <Link size={16} className="text-[var(--text-secondary)]" />
-                                <input
-                                    type="text"
-                                    value={port}
-                                    onChange={(e) => setPort(e.target.value)}
-                                    className="bg-transparent border-none text-[var(--text-primary)] w-full py-2 focus:outline-none"
-                                    disabled={isConnected}
-                                />
+                            <div className="flex items-center gap-2">
+                                <div className="flex-1 flex items-center gap-2 bg-[rgba(15,23,42,0.5)] rounded-md px-2 border border-[var(--border-color)]">
+                                    <Link size={16} className="text-[var(--text-secondary)]" />
+                                    {isLoadingPorts ? (
+                                        <span className="text-sm text-[var(--text-secondary)] py-2 w-full">Scanning...</span>
+                                    ) : availablePorts.length > 0 ? (
+                                        <select
+                                            value={port}
+                                            onChange={(e) => setPort(e.target.value)}
+                                            className="bg-transparent border-none text-[var(--text-primary)] w-full py-2 focus:outline-none [&>option]:bg-[#1e293b]"
+                                            disabled={isConnected}
+                                        >
+                                            {availablePorts.map(p => (
+                                                <option key={p} value={p}>{p}</option>
+                                            ))}
+                                        </select>
+                                    ) : (
+                                        <input
+                                            type="text"
+                                            value={port}
+                                            onChange={(e) => setPort(e.target.value)}
+                                            className="bg-transparent border-none text-[var(--text-primary)] w-full py-2 focus:outline-none"
+                                            disabled={isConnected}
+                                            placeholder="/dev/ttyUSB0 or COM3"
+                                        />
+                                    )}
+                                </div>
+                                <button 
+                                    onClick={fetchPorts}
+                                    disabled={isConnected || isLoadingPorts}
+                                    className="p-2 bg-[rgba(15,23,42,0.5)] border border-[var(--border-color)] rounded-md text-[var(--text-secondary)] hover:text-white hover:border-[var(--accent-color)] transition-colors disabled:opacity-50"
+                                    title="Rescan USB Ports"
+                                >
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={isLoadingPorts ? "animate-spin" : ""}>
+                                        <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
+                                        <path d="M3 3v5h5"></path>
+                                        <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"></path>
+                                        <path d="M16 21v-5h5"></path>
+                                    </svg>
+                                </button>
                             </div>
                         </div>
                         <div>

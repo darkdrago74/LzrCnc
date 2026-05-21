@@ -82,6 +82,8 @@ function getNetworkIp() {
     return '127.0.0.1';
 }
 
+import { SerialPort } from 'serialport';
+
 server.get('/ping', async (request, reply) => {
     return {
         status: 'ok',
@@ -89,6 +91,27 @@ server.get('/ping', async (request, reply) => {
         sim: isSim,
         ip: getNetworkIp()
     };
+});
+
+server.get('/api/ports', async (request, reply) => {
+    try {
+        const ports = await SerialPort.list();
+        let filteredPorts = ports.filter(p => {
+            const desc = (p.manufacturer || '').toLowerCase();
+            const pnpId = (p.pnpId || '').toLowerCase();
+            return desc.includes('arduino') || desc.includes('ch340') || desc.includes('cp210') || desc.includes('ftdi') || pnpId.includes('arduino') || p.path.toLowerCase().includes('usb');
+        });
+
+        if (filteredPorts.length === 0) {
+            filteredPorts = ports;
+        }
+
+        const portNames = filteredPorts.map(p => p.path);
+        return { ports: portNames };
+    } catch (e) {
+        server.log.error(e);
+        return reply.code(500).send({ error: 'Failed to list ports' });
+    }
 });
 
 server.post('/connect', async (request: any, reply) => {

@@ -33,4 +33,5 @@ check_and_free_port 3000
 check_and_free_port 3001
 
 echo "Starting LzrCnc Server..."
-npm start
+cd soft || { echo "Error: soft directory not found."; exit 1; }
+npm run dev

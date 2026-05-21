@@ -15,7 +15,9 @@ echo   - Client: http://localhost:3000
 echo   - Server: http://localhost:3001
 echo.
 
+cd soft
 call npm run dev
+cd ..
 pause
 exit /b
 
