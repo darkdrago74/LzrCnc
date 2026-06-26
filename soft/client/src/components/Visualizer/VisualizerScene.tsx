@@ -1,4 +1,4 @@
-import React, { useState, useRef, Suspense, useEffect } from 'react';
+import React, { useState, useRef, Suspense, useEffect, useCallback } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls, TransformControls } from '@react-three/drei';
 import { EffectComposer, Bloom } from '@react-three/postprocessing';
@@ -10,7 +10,9 @@ import { BackgroundLaser } from './BackgroundLaser';
 
 import { PreviewLayer } from './PreviewLayer';
 import ObjectRenderer from './ObjectRenderer';
-import type { SceneObject } from '../../types';
+import PathRenderer from '../cam/PathRenderer';
+import ToolpathOverlay from '../cam/ToolpathOverlay';
+import type { SceneObject, DetectedPath, ToolpathPolygon } from '../../types';
 
 interface VisualizerSceneProps {
     machinePos: { x: number, y: number, z: number };
@@ -29,19 +31,37 @@ interface VisualizerSceneProps {
     objects?: SceneObject[];
     onSelectObject?: (id: string) => void;
     onObjectUpdate?: (id: string, updates: Partial<SceneObject>) => void;
+    // Milling path overlay
+    detectedPaths?: DetectedPath[];
+    selectedPathIds?: string[];
+    onPathSelect?: (id: string, multi: boolean) => void;
+    /** Called when user finishes dragging a path — provides the new XY offset */
+    onPathMove?: (id: string, position: [number, number, number]) => void;
+    /** Computed toolpath polygons (offset outlines) to render as preview */
+    toolpathPolygons?: ToolpathPolygon[];
 }
 
 const VisualizerScene: React.FC<VisualizerSceneProps> = ({
     machinePos, limits, gcode = [], laserBeamEnabled = true, machineSettings,
-    previewContent, previewType, previewSize, objects, onSelectObject, onObjectUpdate
+    previewContent, previewType, previewSize, objects, onSelectObject, onObjectUpdate,
+    detectedPaths, selectedPathIds = [], onPathSelect, onPathMove, toolpathPolygons
 }) => {
     const [is2D, setIs2D] = useState(false);
     const containerRef = useRef<HTMLDivElement>(null);
     const objectRefs = useRef<Record<string, THREE.Group | null>>({});
+    const pathGroupRefs = useRef<Record<string, THREE.Group | null>>({});
     const orbitRef = useRef<any>(null);
+
+    // Stable callback so PathObject's useEffect doesn't re-run on every render
+    const handlePathGroupMount = useCallback((id: string, g: THREE.Group | null) => {
+        pathGroupRefs.current[id] = g;
+    }, []);
 
     const [transformMode, setTransformMode] = useState<'translate' | 'rotate' | 'scale'>('translate');
     const selectedObject = objects?.find(o => o.selected);
+
+    // Single selected path — only attach TransformControls when exactly 1 is chosen
+    const singlePathId = selectedPathIds.length === 1 ? selectedPathIds[0] : null;
 
     // Transform Mode Shortcuts
     useEffect(() => {
@@ -189,6 +209,37 @@ const VisualizerScene: React.FC<VisualizerSceneProps> = ({
                         />
                     )}
                     <GCodeViewer gcode={gcode} />
+
+                    {/* Milling path overlay — rendered from analyzed DXF/SVG */}
+                    {detectedPaths && detectedPaths.length > 0 && onPathSelect && (
+                        <PathRenderer
+                            paths={detectedPaths}
+                            selectedIds={selectedPathIds}
+                            onSelect={onPathSelect}
+                            onGroupMount={handlePathGroupMount}
+                        />
+                    )}
+
+                    {/* TransformControls for a single selected milling path (translate only) */}
+                    {singlePathId && pathGroupRefs.current[singlePathId] && (
+                        <TransformControls
+                            object={pathGroupRefs.current[singlePathId]!}
+                            mode="translate"
+                            onMouseUp={() => {
+                                const g = pathGroupRefs.current[singlePathId];
+                                if (g && onPathMove) {
+                                    onPathMove(singlePathId, [
+                                        g.position.x,
+                                        g.position.y,
+                                        g.position.z,
+                                    ]);
+                                }
+                            }}
+                        />
+                    )}
+
+                    {/* Toolpath offset preview — green/orange/yellow HDR lines */}
+                    <ToolpathOverlay toolpaths={toolpathPolygons ?? []} />
                 </group>
             </Canvas>
 

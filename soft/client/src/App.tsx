@@ -5,12 +5,13 @@ import CamPanel from './components/CamPanel';
 import Terminal from './components/Terminal';
 import MacroPanel from './components/MacroPanel';
 import VisualizerScene from './components/Visualizer/VisualizerScene';
-import type { MachineStatus } from './types';
+import type { MachineStatus, DetectedPath, MillingOperation, ToolpathPolygon } from './types';
 import { Activity } from 'lucide-react';
 
 import { Sidebar } from './components/Sidebar';
 import { BackgroundFX } from './components/BackgroundFX';
 import MachineSettingsPanel from './components/MachineSettingsPanel';
+import { JobWizardModal } from './components/cnc/JobWizardModal';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
@@ -36,6 +37,7 @@ function App() {
 
   // ...
   const [connectionError, setConnectionError] = useState<string | null>(null);
+  const [wizardOpen, setWizardOpen] = useState(false);
 
   const fetchStatus = useCallback(async () => {
     try {
@@ -114,6 +116,26 @@ function App() {
     }
   };
 
+  const executeJob = async (setupCmds: string[], mode: 'absolute' | 'relative') => {
+      try {
+          const res = await fetch(`${API_URL}/cam/stream-job`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                  setupCommands: setupCmds,
+                  gcode: gcode
+              })
+          });
+          if (!res.ok) {
+              const txt = await res.text();
+              alert(`[ERROR] Failed to start stream: ${res.status} ${txt}`);
+          }
+      } catch (e: any) {
+          console.error(e);
+          alert(`[ERROR] Network Error: ${e.message}`);
+      }
+  };
+
   const handleProbe = async (options: unknown) => {
     try {
       await fetch(`${API_URL}/probe`, {
@@ -183,6 +205,93 @@ function App() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [objects, setObjects] = useState<any[]>([]);
 
+  // Milling path analysis state
+  const [detectedPaths, setDetectedPaths] = useState<DetectedPath[]>([]);
+  const [selectedPathIds, setSelectedPathIds] = useState<string[]>([]);
+  /** Position offsets applied by the user dragging paths in the visualizer */
+  const [pathOffsets, setPathOffsets] = useState<Record<string, [number, number, number]>>({});
+
+  const handlePathSelect = (id: string, multi: boolean) => {
+    setSelectedPathIds(prev =>
+      multi
+        ? prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+        : prev.length === 1 && prev[0] === id ? [] : [id]
+    );
+  };
+
+  const handlePathMove = (id: string, position: [number, number, number]) => {
+    setPathOffsets(prev => ({ ...prev, [id]: position }));
+  };
+
+  // Milling operations queue + toolpath preview
+  const [millingOperations, setMillingOperations] = useState<MillingOperation[]>([]);
+  const [toolpathPolygons, setToolpathPolygons] = useState<ToolpathPolygon[]>([]);
+  const [millingLoading, setMillingLoading] = useState(false);
+  const [stockSurface, setStockSurface] = useState(0);
+  const [millingJobStats, setMillingJobStats] = useState<{ lines: number; estimatedTime: string } | null>(null);
+
+  const handleAddOperation = (op: MillingOperation) => {
+    setMillingOperations(prev => [...prev, op]);
+    setSelectedPathIds([]);           // clear selection so user can pick next group
+    setToolpathPolygons([]);          // invalidate previous preview
+    setMillingJobStats(null);
+  };
+
+  const handleDeleteOperation = (id: string) => {
+    setMillingOperations(prev => prev.filter(o => o.id !== id));
+    setToolpathPolygons([]);
+    setMillingJobStats(null);
+  };
+
+  const handleReorderOperation = (id: string, dir: -1 | 1) => {
+    setMillingOperations(prev => {
+      const idx = prev.findIndex(o => o.id === id);
+      if (idx < 0) return prev;
+      const next = idx + dir;
+      if (next < 0 || next >= prev.length) return prev;
+      const arr = [...prev];
+      [arr[idx], arr[next]] = [arr[next], arr[idx]];
+      return arr;
+    });
+    setMillingJobStats(null);
+  };
+
+  const handleClearAllOperations = () => {
+    setMillingOperations([]);
+    setToolpathPolygons([]);
+    setMillingJobStats(null);
+  };
+
+  const handleGenerateMilling = async () => {
+    if (millingOperations.length === 0 || detectedPaths.length === 0) return;
+    setMillingLoading(true);
+    setMillingJobStats(null);
+    try {
+      const res = await fetch(`${API_URL}/cam/generate-milling`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          paths: detectedPaths,
+          pathOffsets,
+          operations: millingOperations,
+          stockSurface,
+        }),
+      });
+      const data = await res.json();
+      if (data.status === 'success') {
+        handleGcodeGenerated(data.gcode);
+        setToolpathPolygons(data.toolpathPolygons || []);
+        setMillingJobStats(data.stats || null);
+      } else {
+        alert(`[ERROR] ${data.error}`);
+      }
+    } catch (e: any) {
+      alert(`[ERROR] ${e.message}`);
+    } finally {
+      setMillingLoading(false);
+    }
+  };
+
   // Dynamic Sidebar Width (Controlled by children like CamPanel)
   const [sidebarWidth, setSidebarWidth] = useState(400);
 
@@ -217,11 +326,44 @@ function App() {
           setObjects={setObjects}
           setSidebarWidth={setSidebarWidth}
           machineSettings={draftSettings || status.machineSettings}
+          setDetectedPaths={setDetectedPaths}
+          detectedPaths={detectedPaths}
+          selectedPathIds={selectedPathIds}
+          onSelectionChange={setSelectedPathIds}
+          millingOperations={millingOperations}
+          onAddOperation={handleAddOperation}
+          onDeleteOperation={handleDeleteOperation}
+          onReorderOperation={handleReorderOperation}
+          onClearAllOperations={handleClearAllOperations}
+          onGenerateMilling={handleGenerateMilling}
+          millingLoading={millingLoading}
+          stockSurface={stockSurface}
+          onStockSurfaceChange={setStockSurface}
+          millingJobStats={millingJobStats}
         />;
       case 'gcode':
         return (
           <div className="h-full flex flex-col">
-            <h2 className="text-xl font-bold mb-4">G-Code Job</h2>
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-xl font-bold">G-Code Job ({gcode.length} lines)</h2>
+              <div className="flex gap-2">
+                <button 
+                  onClick={() => handleCommand('G92.1')}
+                  className="bg-gray-700 hover:bg-gray-600 text-xs px-3 py-1.5 rounded border border-gray-600 font-bold transition-colors"
+                  title="Reset Workspace Offsets (G92.1)"
+                >
+                  Reset Workspace
+                </button>
+                {gcode.length > 0 && (
+                  <button 
+                    onClick={() => setWizardOpen(true)}
+                    className="bg-green-600 hover:bg-green-500 text-white text-xs px-4 py-1.5 rounded font-bold shadow-[0_0_10px_rgba(34,197,94,0.4)] transition-all flex items-center gap-2"
+                  >
+                    Run Job Wizard
+                  </button>
+                )}
+              </div>
+            </div>
             <div className="flex-1 overflow-hidden">
               <Terminal logs={status.logs || []} onCommand={handleCommand} />
             </div>
@@ -318,6 +460,11 @@ function App() {
             onObjectUpdate={(id: string, updates: any) => {
               setObjects(objs => objs.map(o => o.id === id ? { ...o, ...updates } : o));
             }}
+            detectedPaths={detectedPaths}
+            selectedPathIds={selectedPathIds}
+            onPathSelect={handlePathSelect}
+            onPathMove={handlePathMove}
+            toolpathPolygons={toolpathPolygons}
           />
         )}
 
@@ -332,6 +479,16 @@ function App() {
           </div>
         </div>
       </div>
+
+      <JobWizardModal 
+        isOpen={wizardOpen}
+        onClose={() => setWizardOpen(false)}
+        onExecute={executeJob}
+        status={status}
+        gcodeData={gcode}
+        machineSettings={draftSettings || status.machineSettings}
+        onCommand={handleCommand}
+      />
     </div>
   );
 }

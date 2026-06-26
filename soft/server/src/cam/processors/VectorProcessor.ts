@@ -125,9 +125,9 @@ export class VectorProcessor extends CamProcessor {
                         }
                     };
                 } else if (entity.type === 'ARC') {
-                    // DXF radians -> MakerJs degrees
-                    const startDeg = entity.startAngle * 180 / Math.PI;
-                    const endDeg = entity.endAngle * 180 / Math.PI;
+                    // DXF angles are already in degrees
+                    const startDeg = entity.startAngle;
+                    const endDeg = entity.endAngle;
                     rootModel.models![id] = {
                         paths: {
                             arc: new makerjs.paths.Arc([entity.center.x, entity.center.y], entity.radius, startDeg, endDeg)

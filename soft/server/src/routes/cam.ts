@@ -2,11 +2,15 @@ import { FastifyInstance } from 'fastify';
 import { CamService } from '../cam/CamService.js';
 import { DxfConverter } from '../cam/processors/DxfConverter.js';
 import { GCodeModifier } from '../cam/processors/GCodeModifier.js';
+import { PathAnalyzer } from '../cam/PathAnalyzer.js';
+import { MillingGcodeGenerator } from '../cam/MillingGcodeGenerator.js';
 
 export default async function camRoutes(server: FastifyInstance) {
     const camService = new CamService();
     const dxfConverter = new DxfConverter();
     const gcodeModifier = new GCodeModifier();
+    const pathAnalyzer = new PathAnalyzer();
+    const millingGenerator = new MillingGcodeGenerator();
 
     server.post('/cam/generate', async (request: any, reply) => {
         const { fileContent, filePath, fileName, operations, options } = request.body;
@@ -105,6 +109,67 @@ export default async function camRoutes(server: FastifyInstance) {
             }
             const modified = gcodeModifier.modify(fileContent, options || {});
             return { status: 'success', gcode: modified };
+        } catch (err: any) {
+            server.log.error(err);
+            return reply.code(500).send({ error: err.message });
+        }
+    });
+
+    /**
+     * POST /cam/analyze-paths
+     * Parses a DXF or SVG file and returns all detected paths with metadata:
+     *   - closed / open flag
+     *   - shape classification (circle, rectangle, polygon, closed_curve, open_curve)
+     *   - discretized points ready for Three.js rendering
+     *   - raw primitives for later G-code generation
+     */
+    server.post('/cam/analyze-paths', async (request: any, reply) => {
+        try {
+            const { fileContent, fileName } = request.body;
+            if (!fileContent) {
+                return reply.code(400).send({ error: 'No file content provided' });
+            }
+
+            // Strip data-URI prefix if present
+            let rawContent: string = fileContent;
+            if (rawContent.startsWith('data:')) {
+                const b64 = rawContent.split(';base64,').pop() ?? '';
+                rawContent = Buffer.from(b64, 'base64').toString('utf8');
+            }
+
+            const isDxf = (fileName as string)?.toLowerCase().endsWith('.dxf');
+            const paths = isDxf
+                ? pathAnalyzer.analyzeDxf(rawContent)
+                : pathAnalyzer.analyzeSvg(rawContent);
+
+            return { status: 'success', paths };
+        } catch (err: any) {
+            server.log.error(err);
+            return reply.code(500).send({ error: err.message });
+        }
+    });
+
+    /**
+     * POST /cam/generate-milling
+     * Generates 2.5D milling G-code from a set of operations.
+     * Returns: gcode string + toolpathPolygons (offset outlines for visualizer preview).
+     */
+    server.post('/cam/generate-milling', async (request: any, reply) => {
+        try {
+            const { paths, pathOffsets, operations, stockSurface } = request.body;
+
+            if (!paths || !Array.isArray(paths) || !operations || operations.length === 0) {
+                return reply.code(400).send({ error: 'Missing paths or operations' });
+            }
+
+            const result = millingGenerator.generate({
+                paths,
+                pathOffsets: pathOffsets || {},
+                operations,
+                stockSurface: stockSurface ?? 0,
+            });
+
+            return { status: 'success', ...result };
         } catch (err: any) {
             server.log.error(err);
             return reply.code(500).send({ error: err.message });

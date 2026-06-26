@@ -3,18 +3,22 @@ import FileUpload from './FileUpload';
 import GcodePreview from './GcodePreview';
 import TestGeneratorPanel from './TestGeneratorPanel';
 import MaterialsPanel from './MaterialsPanel';
-import type { VectorOptions } from '../types';
+import type { VectorOptions, DetectedPath } from '../types';
 import { LaserOperationStack } from './cam/LaserOperationStack';
 import { OperationSettings } from './cam/OperationSettings';
 import { DitheringPreview } from './cam/DitheringPreview';
 import VisualizerScene from './Visualizer/VisualizerScene';
-import { CncPanel } from './cnc/CncPanel';
 import type { CamOperation } from './cam/interfaces';
+import { CncPanel } from './cnc/CncPanel';
 import { DesignerToolbar } from './cam/DesignerToolbar';
+import { DrawingModal } from './cam/DrawingModal';
 import { HelpIcon } from './ui/Tooltip';
 import { ObjectProperties } from './cam/ObjectProperties';
-import { ChevronRight, ChevronLeft, Zap, Wrench, Library, FlaskConical, Trash2, Save, Play } from 'lucide-react';
-import type { SceneObject } from '../types';
+import { PathSelectorPanel } from './cam/PathSelectorPanel';
+import { MillingOperationEditor } from './cam/MillingOperationEditor';
+import type { OperationFormValues } from './cam/MillingOperationEditor';
+import { ChevronRight, ChevronLeft, Zap, Wrench, Library, FlaskConical, Trash2, Save, Play, Drill } from 'lucide-react';
+import type { SceneObject, MillingOperation } from '../types';
 // Simple random ID generator (avoiding uuid dep)
 const uuidv4 = () => Math.random().toString(36).substring(2, 10);
 
@@ -25,18 +29,43 @@ interface CamPanelProps {
     setObjects: React.Dispatch<React.SetStateAction<SceneObject[]>>;
     setSidebarWidth: (w: number) => void;
     machineSettings?: any;
+    // Milling path analysis
+    detectedPaths?: DetectedPath[];
+    setDetectedPaths?: (paths: DetectedPath[]) => void;
+    selectedPathIds?: string[];
+    onSelectionChange?: (ids: string[]) => void;
+    // Milling operations (Phase 2+3)
+    millingOperations?: MillingOperation[];
+    onAddOperation?: (op: MillingOperation) => void;
+    onDeleteOperation?: (id: string) => void;
+    onReorderOperation?: (id: string, dir: -1 | 1) => void;
+    onClearAllOperations?: () => void;
+    onGenerateMilling?: () => void;
+    millingLoading?: boolean;
+    stockSurface?: number;
+    onStockSurfaceChange?: (v: number) => void;
+    millingJobStats?: { lines: number; estimatedTime: string } | null;
 }
 
-const CamPanel: React.FC<CamPanelProps> = ({ onGenerate, objects, setObjects, setSidebarWidth, machineSettings }) => {
+const CamPanel: React.FC<CamPanelProps> = ({
+    onGenerate, objects, setObjects, setSidebarWidth, machineSettings,
+    detectedPaths = [], setDetectedPaths, selectedPathIds = [], onSelectionChange,
+    millingOperations = [], onAddOperation, onDeleteOperation,
+    onReorderOperation, onClearAllOperations,
+    onGenerateMilling, millingLoading = false,
+    stockSurface = 0, onStockSurfaceChange, millingJobStats
+}) => {
     const [fileName, setFileName] = useState<string | null>(null);
     const [fileContent, setFileContent] = useState<string | null>(null);
     const [operations, setOperations] = useState<CamOperation[]>([]);
     const [selectedOpId, setSelectedOpId] = useState<string | null>(null);
     const [gcode, setGcode] = useState<string>('');
     const [loading, setLoading] = useState(false);
+    const [isDrawingModalOpen, setDrawingModalOpen] = useState(false);
+    const [pathAnalysisLoading, setPathAnalysisLoading] = useState(false);
 
     // Legacy file state kept for compatibility, but primarily using objects now
-    const [activeTab, setActiveTab] = useState<'laser' | 'cnc' | 'materials' | 'generator'>('laser');
+    const [activeTab, setActiveTab] = useState<'laser' | 'cnc' | 'mill' | 'materials' | 'generator'>('laser');
     const [isExpanded, setIsExpanded] = useState(true);
 
     const [materialThickness, setMaterialThickness] = useState(3);
@@ -76,6 +105,7 @@ const CamPanel: React.FC<CamPanelProps> = ({ onGenerate, objects, setObjects, se
     const items = [
         { id: 'laser', icon: Zap, label: 'Laser' },
         { id: 'cnc', icon: Wrench, label: 'CNC' },
+        { id: 'mill', icon: Drill, label: 'Mill' },
         { id: 'materials', icon: Library, label: 'Lib' },
         { id: 'generator', icon: FlaskConical, label: 'Test' },
     ];
@@ -121,30 +151,18 @@ const CamPanel: React.FC<CamPanelProps> = ({ onGenerate, objects, setObjects, se
         setObjects([...updated, newObj]);
     };
 
-    const handleAddRect = () => {
-        const svg = `<svg width="100" height="100" xmlns="http://www.w3.org/2000/svg"><rect x="0" y="0" width="100" height="100" fill="none" stroke="cyan" stroke-width="5"/></svg>`;
-        addObject('rect', svg);
-    };
-
-    const handleAddCircle = () => {
-        const svg = `<svg width="100" height="100" xmlns="http://www.w3.org/2000/svg"><circle cx="50" cy="50" r="48" fill="none" stroke="cyan" stroke-width="5"/></svg>`;
-        addObject('circle', svg);
-    };
-
-    const handleAddText = (text: string) => {
-        // Basic SVG Text
-        const svg = `<svg width="200" height="50" xmlns="http://www.w3.org/2000/svg"><text x="0" y="40" font-family="Arial" font-size="40" fill="cyan" stroke="none">${text}</text></svg>`;
-        addObject('text', svg);
-    };
-
     const handleFile = (name: string, content: string | File, type: 'vector' | 'raster') => {
         setFileName(name);
 
         // Handle file content reading for preview
         if (typeof content === 'string') {
-            setFileContent(content); // SVG or path?
-            // Add as Object
+            setFileContent(content);
             addObject('file', content);
+            // Trigger path analysis for DXF/SVG files
+            const isMillingFile = /\.(dxf|svg)$/i.test(name);
+            if (isMillingFile && setDetectedPaths) {
+                analyzePaths(name, content);
+            }
         } else {
             // Read as DataURL for preview
             const reader = new FileReader();
@@ -159,11 +177,20 @@ const CamPanel: React.FC<CamPanelProps> = ({ onGenerate, objects, setObjects, se
             } else if (type === 'raster' || name.match(/\.(png|jpe?g|webp|bmp)$/i)) {
                 addObject('image', url, name);
             } else if (type === 'gcode' as any) {
-                // Read content again text for G-Code
                 const textReader = new FileReader();
                 textReader.onload = (ev) => {
                     setFileContent(ev.target?.result as string);
                     addObject('gcode' as any, ev.target?.result as string, name);
+                };
+                textReader.readAsText(content as File);
+            } else if (/\.(dxf|svg)$/i.test(name) && setDetectedPaths) {
+                // DXF/SVG uploaded as File object — read text then analyze
+                const textReader = new FileReader();
+                textReader.onload = (ev) => {
+                    const text = ev.target?.result as string;
+                    setFileContent(text);
+                    addObject('file', text, name);
+                    analyzePaths(name, text);
                 };
                 textReader.readAsText(content as File);
             }
@@ -185,6 +212,30 @@ const CamPanel: React.FC<CamPanelProps> = ({ onGenerate, objects, setObjects, se
             };
             setOperations([initialOp]);
             setSelectedOpId('op-1');
+        }
+    };
+
+    /** Call server /cam/analyze-paths and store result */
+    const analyzePaths = async (name: string, rawContent: string) => {
+        if (!setDetectedPaths) return;
+        setPathAnalysisLoading(true);
+        try {
+            const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+            const res = await fetch(`${apiUrl}/cam/analyze-paths`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ fileName: name, fileContent: rawContent })
+            });
+            const data = await res.json();
+            if (data.status === 'success') {
+                setDetectedPaths(data.paths);
+                // Auto-switch to Mill tab when paths are detected
+                if (data.paths.length > 0) setActiveTab('mill');
+            }
+        } catch (err) {
+            console.error('Path analysis failed:', err);
+        } finally {
+            setPathAnalysisLoading(false);
         }
     };
 
@@ -458,9 +509,7 @@ const CamPanel: React.FC<CamPanelProps> = ({ onGenerate, objects, setObjects, se
                                 <div className="mb-4 mt-4 p-2 bg-gradient-to-r from-black/60 to-transparent rounded-lg border border-white/5">
                                     <div className="flex justify-between items-center mb-2">
                                         <DesignerToolbar
-                                            onAddRect={handleAddRect}
-                                            onAddCircle={handleAddCircle}
-                                            onAddText={handleAddText}
+                                            onOpen2DEditor={() => setDrawingModalOpen(true)}
                                         />
                                         <button onClick={handleDeleteObject} className="text-xs text-red-500 hover:text-red-400 hover:bg-red-900/10 px-2 py-1 rounded transition-colors flex items-center gap-1">
                                             <span className="text-lg">🗑️</span>
@@ -631,8 +680,203 @@ const CamPanel: React.FC<CamPanelProps> = ({ onGenerate, objects, setObjects, se
                     {activeTab === 'cnc' && <CncPanel onGenerate={onGenerate} />}
                     {activeTab === 'materials' && <MaterialsPanel onSelect={applyMaterial} />}
                     {activeTab === 'generator' && <TestGeneratorPanel onGenerate={handleTestGenerate} />}
+
+                    {activeTab === 'mill' && (
+                        <div className="space-y-4">
+                            <div className="glass-panel p-4 rounded-xl border border-white/10">
+                                <h3 className="text-emerald-400 font-bold mb-3 uppercase text-[10px] tracking-[0.2em]">
+                                    1. Load DXF / SVG
+                                </h3>
+                                <FileUpload onFileLoaded={handleFile} />
+                                {fileName && (
+                                    <p className="mt-2 text-xs text-gray-500 truncate">
+                                        Loaded: <span className="text-gray-300">{fileName}</span>
+                                    </p>
+                                )}
+                            </div>
+
+                            <div className="glass-panel p-4 rounded-xl border border-white/10">
+                                <h3 className="text-emerald-400 font-bold mb-3 uppercase text-[10px] tracking-[0.2em]">
+                                    2. Detected Paths
+                                </h3>
+                                <p className="text-gray-500 text-[10px] mb-3">
+                                    Click a path in the list or in the 3D view to select it.
+                                    <br />Cyan = closed (millable with offset) · Amber = open (follow middle)
+                                </p>
+                                <PathSelectorPanel
+                                    paths={detectedPaths}
+                                    selectedIds={selectedPathIds}
+                                    onSelectionChange={onSelectionChange ?? (() => {})}
+                                    loading={pathAnalysisLoading}
+                                />
+                            </div>
+
+                            {selectedPathIds.length > 0 && (
+                                <div className="glass-panel p-4 rounded-xl border border-white/10">
+                                    <h3 className="text-emerald-400 font-bold mb-3 uppercase text-[10px] tracking-[0.2em]">
+                                        3. Define Operation
+                                    </h3>
+                                    <MillingOperationEditor
+                                        selectedPathIds={selectedPathIds}
+                                        onAdd={(values: OperationFormValues) => {
+                                            const newOp: MillingOperation = {
+                                                id: `op_${Date.now()}`,
+                                                label: `Op ${millingOperations.length + 1} — ${values.cutSide}`,
+                                                pathIds: [...selectedPathIds],
+                                                cutSide: values.cutSide,
+                                                depth: values.depth,
+                                                depthPerPass: values.depthPerPass,
+                                                feedrate: values.feedrate,
+                                                plungeRate: values.plungeRate,
+                                                spindleSpeed: values.spindleSpeed,
+                                                toolDiameter: values.toolDiameter,
+                                                safeZ: values.safeZ,
+                                            };
+                                            onAddOperation?.(newOp);
+                                        }}
+                                    />
+                                </div>
+                            )}
+
+                            {millingOperations.length > 0 && (
+                                <div className="glass-panel p-4 rounded-xl border border-white/10">
+                                    {/* Stock surface Z */}
+                                    <div className="mb-4">
+                                        <label className="text-gray-500 text-[10px] uppercase font-bold mb-1 block">
+                                            Stock Surface Z
+                                        </label>
+                                        <div className="relative">
+                                            <input
+                                                type="number"
+                                                value={stockSurface}
+                                                step={0.5}
+                                                onChange={e => onStockSurfaceChange?.(parseFloat(e.target.value) || 0)}
+                                                className="w-full bg-black/50 border border-white/10 rounded px-2 py-1.5 text-white text-xs font-mono focus:border-emerald-500/50 focus:outline-none pr-10"
+                                            />
+                                            <span className="absolute right-2 top-1.5 text-gray-600 text-[10px] pointer-events-none">mm</span>
+                                        </div>
+                                        <p className="text-[10px] text-gray-600 mt-0.5">Z=0 = top of stock. Set negative if probe is below workpiece origin.</p>
+                                    </div>
+
+                                    <div className="flex items-center justify-between mb-3">
+                                        <h3 className="text-emerald-400 font-bold uppercase text-[10px] tracking-[0.2em]">
+                                            4. Operation Queue
+                                        </h3>
+                                        <button
+                                            onClick={onClearAllOperations}
+                                            className="text-[10px] text-gray-600 hover:text-red-400 transition-colors"
+                                        >
+                                            Clear all
+                                        </button>
+                                    </div>
+
+                                    <div className="space-y-1.5 mb-4">
+                                        {millingOperations.map((op, idx) => (
+                                            <div key={op.id}
+                                                className="flex items-center gap-1.5 bg-white/5 rounded px-2 py-2 text-xs border border-white/5"
+                                            >
+                                                {/* Reorder buttons */}
+                                                <div className="flex flex-col gap-0.5">
+                                                    <button
+                                                        onClick={() => onReorderOperation?.(op.id, -1)}
+                                                        disabled={idx === 0}
+                                                        className="text-gray-600 hover:text-white disabled:opacity-20 leading-none"
+                                                        title="Move up"
+                                                    >▲</button>
+                                                    <button
+                                                        onClick={() => onReorderOperation?.(op.id, 1)}
+                                                        disabled={idx === millingOperations.length - 1}
+                                                        className="text-gray-600 hover:text-white disabled:opacity-20 leading-none"
+                                                        title="Move down"
+                                                    >▼</button>
+                                                </div>
+
+                                                {/* Cut side badge */}
+                                                <span className={`
+                                                    flex-shrink-0 text-[10px] px-1.5 py-0.5 rounded font-bold
+                                                    ${ op.cutSide === 'inside'  ? 'bg-emerald-900/60 text-emerald-300'
+                                                     : op.cutSide === 'outside' ? 'bg-orange-900/60 text-orange-300'
+                                                     :                            'bg-yellow-900/60 text-yellow-300'}
+                                                `}>
+                                                    {op.cutSide.toUpperCase()}
+                                                </span>
+
+                                                {/* Details */}
+                                                <span className="flex-1 text-gray-300 truncate">
+                                                    {op.label}
+                                                </span>
+                                                <span className="text-gray-500 text-[10px]">
+                                                    {op.pathIds.length}p · {op.depth}mm · ø{op.toolDiameter}
+                                                </span>
+
+                                                {/* Delete */}
+                                                <button
+                                                    onClick={() => onDeleteOperation?.(op.id)}
+                                                    className="text-gray-600 hover:text-red-400 transition-colors"
+                                                    title="Remove"
+                                                >×</button>
+                                            </div>
+                                        ))}
+                                    </div>
+
+                                    {/* Generate button */}
+                                    <button
+                                        onClick={onGenerateMilling}
+                                        disabled={millingLoading}
+                                        className={`
+                                            w-full py-3 rounded border text-sm font-bold transition-all flex items-center justify-center gap-2
+                                            ${ millingLoading
+                                                ? 'bg-white/5 border-white/10 text-gray-500 cursor-not-allowed'
+                                                : 'bg-emerald-600/60 hover:bg-emerald-600/80 border-emerald-500/50 text-white shadow-[0_0_12px_rgba(16,185,129,0.3)]'
+                                            }
+                                        `}
+                                    >
+                                        {millingLoading ? (
+                                            <>
+                                                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                                                Generating…
+                                            </>
+                                        ) : (
+                                            <>
+                                                <Drill size={16} />
+                                                Generate G-code ({millingOperations.length} op{millingOperations.length !== 1 ? 's' : ''})
+                                            </>
+                                        )}
+                                    </button>
+
+                                    {/* Post-generation summary */}
+                                    {millingJobStats && (
+                                        <div className="mt-3 bg-emerald-900/20 border border-emerald-700/30 rounded p-3 text-xs space-y-1">
+                                            <p className="text-emerald-400 font-bold uppercase text-[10px] tracking-widest mb-2">Job Summary</p>
+                                            <div className="flex justify-between text-gray-300">
+                                                <span className="text-gray-500">G-code lines</span>
+                                                <span className="font-mono">{millingJobStats.lines.toLocaleString()}</span>
+                                            </div>
+                                            <div className="flex justify-between text-gray-300">
+                                                <span className="text-gray-500">Est. cut time</span>
+                                                <span className="font-mono text-emerald-300">{millingJobStats.estimatedTime}</span>
+                                            </div>
+                                            <div className="flex justify-between text-gray-300">
+                                                <span className="text-gray-500">Operations</span>
+                                                <span className="font-mono">{millingOperations.length}</span>
+                                            </div>
+                                            <p className="text-[10px] text-gray-600 pt-1">Switch to the G-Code tab to review and run the job.</p>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                    )}
                 </div>
             </div>
+
+            <DrawingModal 
+                isOpen={isDrawingModalOpen}
+                onClose={() => setDrawingModalOpen(false)}
+                objects={objects}
+                setObjects={setObjects}
+                machineSettings={machineSettings}
+            />
         </div>
     );
 };

@@ -99,19 +99,89 @@ export interface RasterOptions {
     mode: 'grayscale' | 'bw' | 'dither';
 }
 
+export type ShapeType = 'rect' | 'circle' | 'ellipse' | 'polygon' | 'star';
+
+export interface ParametricConfig {
+    shape: ShapeType;
+    width?: number;       // rect, ellipse
+    height?: number;      // rect, ellipse
+    radius?: number;      // circle, polygon
+    rx?: number;          // rect rounded corners
+    ry?: number;          // rect rounded corners
+    sides?: number;       // polygon, star
+    innerRadius?: number; // star
+}
+
 export interface SceneObject {
     id: string;
     name: string;
-    type: 'file' | 'rect' | 'circle' | 'text' | 'stl' | 'gcode' | 'image';
+    type: 'file' | 'rect' | 'circle' | 'text' | 'stl' | 'gcode' | 'image' | 'ellipse' | 'polygon' | 'star';
     content: string; // SVG string, DXF string, or URL
     position: [number, number, number];
     rotation: [number, number, number];
     scale: [number, number, number];
     selected?: boolean;
+    parametric?: ParametricConfig;
     gcodeOptions?: {
         offsetX: number;
         offsetY: number;
         feedrateScale: number;
         feedrateOverride?: number;
     };
+}
+
+// ── Path analysis types (Phase 1 – milling) ──────────────────────────────────
+
+export type PathClassification =
+    | 'circle'
+    | 'ellipse'
+    | 'rectangle'
+    | 'polygon'
+    | 'closed_curve'   // closed loop containing arcs/splines
+    | 'open_curve';    // open path — tool always follows the middle line
+
+export interface PathPoint { x: number; y: number; }
+
+export type RawPrimitive =
+    | { type: 'line';     x1: number; y1: number; x2: number; y2: number }
+    | { type: 'arc';      cx: number; cy: number; radius: number; startAngle: number; endAngle: number }
+    | { type: 'circle';   cx: number; cy: number; radius: number }
+    | { type: 'polyline'; points: PathPoint[]; closed: boolean };
+
+export interface DetectedPath {
+    id: string;
+    closed: boolean;
+    classification: PathClassification;
+    /** Discretized points — direct input for THREE.BufferGeometry */
+    points: PathPoint[];
+    bounds: { minX: number; minY: number; maxX: number; maxY: number; width: number; height: number };
+    rawPrimitives: RawPrimitive[];
+}
+
+/** A milling operation assigned to a set of detected paths */
+export type CutSide = 'inside' | 'outside' | 'on';
+
+export interface MillingOperation {
+    id: string;
+    label: string;
+    pathIds: string[];
+    cutSide: CutSide;
+    /** Total depth below stock surface (positive mm) */
+    depth: number;
+    /** Depth increment per pass (positive mm) */
+    depthPerPass: number;
+    feedrate: number;
+    plungeRate: number;
+    spindleSpeed: number;
+    /** Endmill diameter in mm — used for inside/outside offset calculation */
+    toolDiameter: number;
+    /** Retract height above stock surface (mm) */
+    safeZ: number;
+}
+
+/** Computed offset polygon returned by the server after G-code generation */
+export interface ToolpathPolygon {
+    id: string;
+    points: PathPoint[];
+    cutSide: CutSide;
 }

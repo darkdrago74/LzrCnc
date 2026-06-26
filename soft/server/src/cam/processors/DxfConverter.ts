@@ -49,9 +49,9 @@ export class DxfConverter {
                     entity.radius
                 );
             } else if (entity.type === 'ARC') {
-                // dxf-parser startAngle and endAngle are in radians
-                const startDeg = entity.startAngle * (180 / Math.PI);
-                const endDeg = entity.endAngle * (180 / Math.PI);
+                // dxf-parser startAngle and endAngle are in DEGREES (not radians)
+                const startDeg = entity.startAngle;
+                const endDeg = entity.endAngle;
                 rootModel.paths![`arc_${i++}`] = new makerjs.paths.Arc(
                     [entity.center.x, entity.center.y],
                     entity.radius,
