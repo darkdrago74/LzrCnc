@@ -60,6 +60,8 @@ const ENDPOINT_TOLERANCE = 0.01;
 const CIRCLE_SEGMENTS = 64;
 /** Segments used to approximate an arc per 360° */
 const ARC_SEGMENTS_FULL = 64;
+/** Segments used to approximate each SVG bezier curve */
+const BEZIER_SEGMENTS = 16;
 
 interface OpenSegment {
     id: string;
@@ -236,9 +238,9 @@ export class PathAnalyzer {
         let i = 0;
 
         // <circle cx cy r>
-        for (const m of svgContent.matchAll(/<circle[^>]*>/gi)) {
-            const cx = this.svgAttr(m[0], 'cx'), cy = this.svgAttr(m[0], 'cy'), r = this.svgAttr(m[0], 'r');
-            if (cx !== null && cy !== null && r !== null) {
+        for (const m of svgContent.matchAll(/<circle\b[^>]*>/gi)) {
+            const cx = this.svgAttr(m[0], 'cx') ?? 0, cy = this.svgAttr(m[0], 'cy') ?? 0, r = this.svgAttr(m[0], 'r');
+            if (r !== null && r > 0) {
                 const pts = this.discretizeCircle(cx, cy, r);
                 paths.push(this.makeDetectedPath(`svg_circle_${i++}`, true, 'circle', pts,
                     [{ type: 'circle', cx, cy, radius: r }]));
@@ -246,21 +248,21 @@ export class PathAnalyzer {
         }
 
         // <ellipse cx cy rx ry>
-        for (const m of svgContent.matchAll(/<ellipse[^>]*>/gi)) {
-            const cx = this.svgAttr(m[0], 'cx'), cy = this.svgAttr(m[0], 'cy');
+        for (const m of svgContent.matchAll(/<ellipse\b[^>]*>/gi)) {
+            const cx = this.svgAttr(m[0], 'cx') ?? 0, cy = this.svgAttr(m[0], 'cy') ?? 0;
             const rx = this.svgAttr(m[0], 'rx'), ry = this.svgAttr(m[0], 'ry');
-            if (cx !== null && cy !== null && rx !== null && ry !== null) {
+            if (rx !== null && ry !== null && rx > 0 && ry > 0) {
                 const pts = this.discretizeEllipseRadii(cx, cy, rx, ry);
                 paths.push(this.makeDetectedPath(`svg_ellipse_${i++}`, true, 'ellipse', pts, []));
             }
         }
 
         // <rect x y width height>
-        for (const m of svgContent.matchAll(/<rect[^>]*>/gi)) {
+        for (const m of svgContent.matchAll(/<rect\b[^>]*>/gi)) {
             const x = this.svgAttr(m[0], 'x') ?? 0;
             const y = this.svgAttr(m[0], 'y') ?? 0;
             const w = this.svgAttr(m[0], 'width'), h = this.svgAttr(m[0], 'height');
-            if (w !== null && h !== null) {
+            if (w !== null && h !== null && w > 0 && h > 0) {
                 const corners: PathPoint[] = [
                     { x, y }, { x: x + w, y }, { x: x + w, y: y + h }, { x, y: y + h }
                 ];
@@ -270,8 +272,17 @@ export class PathAnalyzer {
             }
         }
 
+        // <line x1 y1 x2 y2>
+        for (const m of svgContent.matchAll(/<line\b[^>]*>/gi)) {
+            const x1 = this.svgAttr(m[0], 'x1') ?? 0, y1 = this.svgAttr(m[0], 'y1') ?? 0;
+            const x2 = this.svgAttr(m[0], 'x2') ?? 0, y2 = this.svgAttr(m[0], 'y2') ?? 0;
+            const pts = [{ x: x1, y: y1 }, { x: x2, y: y2 }];
+            paths.push(this.makeDetectedPath(`svg_line_${i++}`, false, 'open_curve', pts,
+                [{ type: 'line', x1, y1, x2, y2 }]));
+        }
+
         // <polygon points="...">
-        for (const m of svgContent.matchAll(/<polygon[^>]*points="([^"]*)"[^>]*>/gi)) {
+        for (const m of svgContent.matchAll(/<polygon\b[^>]*\spoints\s*=\s*["']([^"']*)["'][^>]*>/gi)) {
             const verts = this.parseSvgPointList(m[1]);
             if (verts.length > 2) {
                 const pts = [...verts, verts[0]];
@@ -281,7 +292,7 @@ export class PathAnalyzer {
         }
 
         // <polyline points="...">
-        for (const m of svgContent.matchAll(/<polyline[^>]*points="([^"]*)"[^>]*>/gi)) {
+        for (const m of svgContent.matchAll(/<polyline\b[^>]*\spoints\s*=\s*["']([^"']*)["'][^>]*>/gi)) {
             const verts = this.parseSvgPointList(m[1]);
             if (verts.length > 1) {
                 paths.push(this.makeDetectedPath(`svg_polyline_${i++}`, false, 'open_curve', verts,
@@ -289,17 +300,96 @@ export class PathAnalyzer {
             }
         }
 
-        // <path d="...">
-        for (const m of svgContent.matchAll(/<path[^>]*\sd="([^"]*)"[^>]*/gi)) {
-            const parsed = this.parseSvgPathD(m[1]);
-            if (parsed.points.length > 1) {
-                const classification = parsed.closed ? this.classifyCorners(parsed.points) : 'open_curve';
-                paths.push(this.makeDetectedPath(`svg_path_${i++}`, parsed.closed, classification, parsed.points,
-                    [{ type: 'polyline', points: parsed.points, closed: parsed.closed }]));
+        // <path d="..."> — each subpath becomes its own DetectedPath
+        for (const m of svgContent.matchAll(/<path\b[^>]*\sd\s*=\s*["']([^"']*)["'][^>]*>/gi)) {
+            for (const sub of this.parseSvgPathSubpaths(m[1])) {
+                if (sub.points.length < 2) continue;
+                const hasCurves = sub.curved;
+                const classification: PathClassification = !sub.closed
+                    ? 'open_curve'
+                    : hasCurves ? 'closed_curve' : this.classifyCorners(sub.points);
+                paths.push(this.makeDetectedPath(`svg_path_${i++}`, sub.closed, classification, sub.points,
+                    [{ type: 'polyline', points: sub.points, closed: sub.closed }]));
             }
         }
 
-        return paths;
+        return this.toMachineCoordinates(svgContent, paths);
+    }
+
+    /**
+     * Maps SVG user units (Y down) to machine millimetres (Y up), using the root
+     * <svg> width/height/viewBox. Unitless and px values are 96 DPI.
+     */
+    private toMachineCoordinates(svgContent: string, paths: DetectedPath[]): DetectedPath[] {
+        const root = /<svg\b[^>]*>/i.exec(svgContent)?.[0] ?? '';
+        const vbRaw = this.svgAttrRaw(root, 'viewBox');
+        let vb: number[] | null = null;
+        if (vbRaw) {
+            const n = vbRaw.trim().split(/[\s,]+/).map(Number);
+            if (n.length === 4 && n.every(v => isFinite(v)) && n[2] > 0 && n[3] > 0) vb = n;
+        }
+        const widthMm = this.lengthToMm(this.svgAttrRaw(root, 'width'));
+        const heightMm = this.lengthToMm(this.svgAttrRaw(root, 'height'));
+        const PX = 25.4 / 96;
+
+        let sx = PX, sy = PX, minX = 0, minY = 0, docH: number;
+        if (vb) {
+            [minX, minY] = vb;
+            docH = vb[3];
+            if (widthMm !== null && heightMm !== null) { sx = widthMm / vb[2]; sy = heightMm / vb[3]; }
+            else if (widthMm !== null) { sx = sy = widthMm / vb[2]; }
+            else if (heightMm !== null) { sx = sy = heightMm / vb[3]; }
+        } else if (heightMm !== null) {
+            docH = heightMm / PX;
+        } else {
+            // No size information: flip around the content's max Y
+            docH = paths.reduce((m, p) => Math.max(m, p.bounds.maxY), 0);
+        }
+
+        const mapPt = (p: PathPoint): PathPoint => ({ x: (p.x - minX) * sx, y: (minY + docH - p.y) * sy });
+        const scaleR = (r: number) => r * (sx + sy) / 2;
+
+        return paths.map(p => {
+            const points = p.points.map(mapPt);
+            const rawPrimitives: RawPrimitive[] = p.rawPrimitives.map(r => {
+                switch (r.type) {
+                    case 'circle': {
+                        const c = mapPt({ x: r.cx, y: r.cy });
+                        return { type: 'circle', cx: c.x, cy: c.y, radius: scaleR(r.radius) };
+                    }
+                    case 'line': {
+                        const a = mapPt({ x: r.x1, y: r.y1 }), b = mapPt({ x: r.x2, y: r.y2 });
+                        return { type: 'line', x1: a.x, y1: a.y, x2: b.x, y2: b.y };
+                    }
+                    case 'polyline':
+                        return { type: 'polyline', points: r.points.map(mapPt), closed: r.closed };
+                    case 'arc': {
+                        // Y flip mirrors angles: (start,end) CCW becomes (-end,-start) CCW
+                        const c = mapPt({ x: r.cx, y: r.cy });
+                        return { type: 'arc', cx: c.x, cy: c.y, radius: scaleR(r.radius), startAngle: -r.endAngle, endAngle: -r.startAngle };
+                    }
+                }
+            });
+            return { ...p, points, rawPrimitives, bounds: this.bounds(points) };
+        });
+    }
+
+    /** Converts an SVG length ("100mm", "4in", "300", "300px") to millimetres. Percentages are ignored. */
+    private lengthToMm(v: string | null): number | null {
+        if (!v) return null;
+        const m = /^\s*([-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?)\s*(mm|cm|in|pt|pc|px|%)?\s*$/i.exec(v);
+        if (!m) return null;
+        const n = parseFloat(m[1]);
+        if (!(n > 0)) return null;
+        switch ((m[2] ?? 'px').toLowerCase()) {
+            case 'mm': return n;
+            case 'cm': return n * 10;
+            case 'in': return n * 25.4;
+            case 'pt': return n * 25.4 / 72;
+            case 'pc': return n * 25.4 / 6;
+            case '%': return null;
+            default: return n * 25.4 / 96;
+        }
     }
 
     // ── Geometry discretization ───────────────────────────────────────────
@@ -496,10 +586,16 @@ export class PathAnalyzer {
 
     // ── SVG helpers ───────────────────────────────────────────────────────
 
-    private svgAttr(tag: string, name: string): number | null {
-        const m = tag.match(new RegExp(`${name}="([^"]*)"`, 'i'));
+    private svgAttrRaw(tag: string, name: string): string | null {
+        const m = tag.match(new RegExp(`(?:^|\\s)${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)')`, 'i'));
         if (!m) return null;
-        const v = parseFloat(m[1]);
+        return m[1] ?? m[2] ?? null;
+    }
+
+    private svgAttr(tag: string, name: string): number | null {
+        const raw = this.svgAttrRaw(tag, name);
+        if (raw === null) return null;
+        const v = parseFloat(raw);
         return isNaN(v) ? null : v;
     }
 
@@ -511,67 +607,196 @@ export class PathAnalyzer {
     }
 
     /**
-     * Minimal SVG path data parser supporting M/L/H/V/C/A/Z commands.
-     * Returns discretized points plus a closed flag.
+     * SVG path data parser (all commands, absolute and relative). Curves are
+     * discretized: beziers into BEZIER_SEGMENTS segments, arcs via the
+     * endpoint→center parameterization. Coordinates stay in SVG user units.
+     * Returns all subpaths concatenated (legacy shape).
      */
     parseSvgPathD(d: string): { points: PathPoint[]; closed: boolean } {
-        const pts: PathPoint[] = [];
-        let closed = false;
-        let cx = 0, cy = 0, startX = 0, startY = 0;
+        const subs = this.parseSvgPathSubpaths(d);
+        const points = subs.flatMap(s => s.points);
+        let closed = subs.length > 0 && subs.every(s => s.closed);
+        if (!closed && points.length > 1) {
+            const f = points[0], l = points[points.length - 1];
+            closed = this.ptEq(f.x, f.y, l.x, l.y);
+        }
+        return { points, closed };
+    }
 
-        // Tokenize into commands and numbers
+    parseSvgPathSubpaths(d: string): Array<{ points: PathPoint[]; closed: boolean; curved: boolean }> {
+        const result: Array<{ points: PathPoint[]; closed: boolean; curved: boolean }> = [];
         const tokens = d.match(/[MmLlHhVvCcSsQqTtAaZz]|[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?/g) ?? [];
-        let i = 0;
-        let cmd = 'M';
+        let pos = 0;
+        let cx = 0, cy = 0, startX = 0, startY = 0;
+        let lastCtrlX = 0, lastCtrlY = 0, lastCmd = '';
+        let cur: { points: PathPoint[]; closed: boolean; curved: boolean } | null = null;
 
-        const num = () => parseFloat(tokens[++i] ?? '0');
+        const isCmd = (t: string | undefined) => t !== undefined && /^[A-Za-z]$/.test(t);
+        const hasNum = () => pos < tokens.length && !isCmd(tokens[pos]);
+        const num = () => parseFloat(tokens[pos++]);
+        // Arc flags may be written without separators ("a1 1 0 00 1 1")
+        const flag = () => {
+            const t = tokens[pos];
+            if (t.length > 1 && (t[0] === '0' || t[0] === '1')) { tokens[pos] = t.slice(1); return t[0] === '1' ? 1 : 0; }
+            pos++;
+            return parseFloat(t) !== 0 ? 1 : 0;
+        };
+        const finish = () => {
+            if (cur && cur.points.length > 0) {
+                if (!cur.closed && cur.points.length > 1) {
+                    const f = cur.points[0], l = cur.points[cur.points.length - 1];
+                    if (this.ptEq(f.x, f.y, l.x, l.y)) cur.closed = true;
+                }
+                result.push(cur);
+            }
+            cur = null;
+        };
+        const ensure = () => {
+            if (!cur) cur = { points: [{ x: cx, y: cy }], closed: false, curved: false };
+            return cur;
+        };
+        const lineTo = (x: number, y: number) => { ensure().points.push({ x, y }); cx = x; cy = y; };
 
-        while (i < tokens.length) {
-            const t = tokens[i];
-            if (/[MmLlHhVvCcSsQqTtAaZz]/.test(t)) { cmd = t; }
+        let cmd = '';
+        while (pos < tokens.length) {
+            if (isCmd(tokens[pos])) cmd = tokens[pos++];
+            else if (!cmd) { pos++; continue; }
+            const rel = cmd === cmd.toLowerCase();
+            const C = cmd.toUpperCase();
+            const ox = rel ? cx : 0, oy = rel ? cy : 0;
 
-            switch (cmd) {
-                case 'M': cx = num(); cy = num(); startX = cx; startY = cy; pts.push({ x: cx, y: cy }); cmd = 'L'; break;
-                case 'm': cx += num(); cy += num(); startX = cx; startY = cy; pts.push({ x: cx, y: cy }); cmd = 'l'; break;
-                case 'L': cx = num(); cy = num(); pts.push({ x: cx, y: cy }); break;
-                case 'l': cx += num(); cy += num(); pts.push({ x: cx, y: cy }); break;
-                case 'H': cx = num(); pts.push({ x: cx, y: cy }); break;
-                case 'h': cx += num(); pts.push({ x: cx, y: cy }); break;
-                case 'V': cy = num(); pts.push({ x: cx, y: cy }); break;
-                case 'v': cy += num(); pts.push({ x: cx, y: cy }); break;
-                case 'Z': case 'z':
-                    closed = true; cx = startX; cy = startY;
-                    pts.push({ x: cx, y: cy });
-                    break;
-                case 'C': num(); num(); num(); num(); cx = num(); cy = num(); pts.push({ x: cx, y: cy }); break;
-                case 'c': num(); num(); num(); num(); cx += num(); cy += num(); pts.push({ x: cx, y: cy }); break;
-                case 'S': num(); num(); cx = num(); cy = num(); pts.push({ x: cx, y: cy }); break;
-                case 's': num(); num(); cx += num(); cy += num(); pts.push({ x: cx, y: cy }); break;
-                case 'Q': num(); num(); cx = num(); cy = num(); pts.push({ x: cx, y: cy }); break;
-                case 'q': num(); num(); cx += num(); cy += num(); pts.push({ x: cx, y: cy }); break;
-                case 'A': case 'a': {
-                    // rx ry x-rotation large-arc-flag sweep-flag x y
-                    num(); num(); num(); num(); const sweep = num();
-                    let ex: number, ey: number;
-                    if (cmd === 'A') { ex = num(); ey = num(); }
-                    else { ex = cx + num(); ey = cy + num(); }
-                    // Approximate arc as straight segment endpoint (SVG arcs in milling are uncommon)
-                    pts.push({ x: ex, y: ey });
-                    cx = ex; cy = ey;
+            if (C === 'Z') {
+                if (cur) {
+                    const c0 = cur as { points: PathPoint[]; closed: boolean; curved: boolean };
+                    const l = c0.points[c0.points.length - 1];
+                    if (!this.ptEq(l.x, l.y, startX, startY)) c0.points.push({ x: startX, y: startY });
+                    c0.closed = true;
+                }
+                cx = startX; cy = startY;
+                finish();
+                lastCmd = 'Z';
+                continue;
+            }
+            if (!hasNum()) { cmd = ''; continue; }
+
+            switch (C) {
+                case 'M': {
+                    finish();
+                    cx = ox + num(); cy = oy + num();
+                    startX = cx; startY = cy;
+                    cur = { points: [{ x: cx, y: cy }], closed: false, curved: false };
+                    cmd = rel ? 'l' : 'L';
                     break;
                 }
-                default: break;
+                case 'L': { const x = ox + num(); const y = oy + num(); lineTo(x, y); break; }
+                case 'H': lineTo(ox + num(), cy); break;
+                case 'V': lineTo(cx, (rel ? cy : 0) + num()); break;
+                case 'C': {
+                    const x1 = ox + num(), y1 = oy + num(), x2 = ox + num(), y2 = oy + num(), x = ox + num(), y = oy + num();
+                    this.cubicTo(ensure(), cx, cy, x1, y1, x2, y2, x, y);
+                    lastCtrlX = x2; lastCtrlY = y2; cx = x; cy = y;
+                    break;
+                }
+                case 'S': {
+                    const refl = lastCmd === 'C' || lastCmd === 'S';
+                    const x1 = refl ? 2 * cx - lastCtrlX : cx, y1 = refl ? 2 * cy - lastCtrlY : cy;
+                    const x2 = ox + num(), y2 = oy + num(), x = ox + num(), y = oy + num();
+                    this.cubicTo(ensure(), cx, cy, x1, y1, x2, y2, x, y);
+                    lastCtrlX = x2; lastCtrlY = y2; cx = x; cy = y;
+                    break;
+                }
+                case 'Q': {
+                    const x1 = ox + num(), y1 = oy + num(), x = ox + num(), y = oy + num();
+                    this.quadTo(ensure(), cx, cy, x1, y1, x, y);
+                    lastCtrlX = x1; lastCtrlY = y1; cx = x; cy = y;
+                    break;
+                }
+                case 'T': {
+                    const refl = lastCmd === 'Q' || lastCmd === 'T';
+                    const x1 = refl ? 2 * cx - lastCtrlX : cx, y1 = refl ? 2 * cy - lastCtrlY : cy;
+                    const x = ox + num(), y = oy + num();
+                    this.quadTo(ensure(), cx, cy, x1, y1, x, y);
+                    lastCtrlX = x1; lastCtrlY = y1; cx = x; cy = y;
+                    break;
+                }
+                case 'A': {
+                    const rx = num(), ry = num(), rot = num();
+                    const large = flag(), sweep = flag();
+                    const x = ox + num(), y = oy + num();
+                    this.arcTo(ensure(), cx, cy, rx, ry, rot, large, sweep, x, y);
+                    cx = x; cy = y;
+                    break;
+                }
+                default: pos++; break;
             }
-            i++;
+            lastCmd = C;
         }
+        finish();
+        return result;
+    }
 
-        // Check geometric closure even without Z (endpoints within tolerance)
-        if (!closed && pts.length > 1) {
-            const first = pts[0], last = pts[pts.length - 1];
-            if (this.ptEq(first.x, first.y, last.x, last.y)) closed = true;
+    private cubicTo(sub: { points: PathPoint[]; curved: boolean }, x0: number, y0: number,
+        x1: number, y1: number, x2: number, y2: number, x3: number, y3: number) {
+        sub.curved = true;
+        for (let k = 1; k <= BEZIER_SEGMENTS; k++) {
+            const t = k / BEZIER_SEGMENTS, u = 1 - t;
+            sub.points.push({
+                x: u * u * u * x0 + 3 * u * u * t * x1 + 3 * u * t * t * x2 + t * t * t * x3,
+                y: u * u * u * y0 + 3 * u * u * t * y1 + 3 * u * t * t * y2 + t * t * t * y3,
+            });
         }
+    }
 
-        return { points: pts, closed };
+    private quadTo(sub: { points: PathPoint[]; curved: boolean }, x0: number, y0: number,
+        x1: number, y1: number, x2: number, y2: number) {
+        sub.curved = true;
+        for (let k = 1; k <= BEZIER_SEGMENTS; k++) {
+            const t = k / BEZIER_SEGMENTS, u = 1 - t;
+            sub.points.push({
+                x: u * u * x0 + 2 * u * t * x1 + t * t * x2,
+                y: u * u * y0 + 2 * u * t * y1 + t * t * y2,
+            });
+        }
+    }
+
+    /** SVG elliptical arc (F.6.5 endpoint → center conversion). */
+    private arcTo(sub: { points: PathPoint[]; curved: boolean }, x1: number, y1: number,
+        rx: number, ry: number, rotDeg: number, large: number, sweep: number, x2: number, y2: number) {
+        if (x1 === x2 && y1 === y2) return;
+        rx = Math.abs(rx); ry = Math.abs(ry);
+        if (rx === 0 || ry === 0) { sub.points.push({ x: x2, y: y2 }); return; }
+        sub.curved = true;
+        const phi = (rotDeg * Math.PI) / 180;
+        const cosP = Math.cos(phi), sinP = Math.sin(phi);
+        const dx = (x1 - x2) / 2, dy = (y1 - y2) / 2;
+        const x1p = cosP * dx + sinP * dy;
+        const y1p = -sinP * dx + cosP * dy;
+        const lambda = (x1p * x1p) / (rx * rx) + (y1p * y1p) / (ry * ry);
+        if (lambda > 1) { const s = Math.sqrt(lambda); rx *= s; ry *= s; }
+        const num = rx * rx * ry * ry - rx * rx * y1p * y1p - ry * ry * x1p * x1p;
+        const den = rx * rx * y1p * y1p + ry * ry * x1p * x1p;
+        let coef = Math.sqrt(Math.max(0, num / den));
+        if (large === sweep) coef = -coef;
+        const cxp = coef * (rx * y1p) / ry;
+        const cyp = coef * -(ry * x1p) / rx;
+        const ccx = cosP * cxp - sinP * cyp + (x1 + x2) / 2;
+        const ccy = sinP * cxp + cosP * cyp + (y1 + y2) / 2;
+        const ang = (ux: number, uy: number, vx: number, vy: number) => {
+            const a = Math.atan2(ux * vy - uy * vx, ux * vx + uy * vy);
+            return a;
+        };
+        const theta1 = ang(1, 0, (x1p - cxp) / rx, (y1p - cyp) / ry);
+        let dTheta = ang((x1p - cxp) / rx, (y1p - cyp) / ry, (-x1p - cxp) / rx, (-y1p - cyp) / ry);
+        if (!sweep && dTheta > 0) dTheta -= 2 * Math.PI;
+        else if (sweep && dTheta < 0) dTheta += 2 * Math.PI;
+        const segs = Math.max(4, Math.ceil((Math.abs(dTheta) / (2 * Math.PI)) * ARC_SEGMENTS_FULL));
+        for (let k = 1; k <= segs; k++) {
+            const t = theta1 + (dTheta * k) / segs;
+            const ex = rx * Math.cos(t), ey = ry * Math.sin(t);
+            sub.points.push(k === segs
+                ? { x: x2, y: y2 }
+                : { x: cosP * ex - sinP * ey + ccx, y: sinP * ex + cosP * ey + ccy });
+        }
     }
 
     // ── Utility ───────────────────────────────────────────────────────────

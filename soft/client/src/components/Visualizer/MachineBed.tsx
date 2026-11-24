@@ -1,120 +1,118 @@
-import React from 'react';
-import { Text, Grid } from '@react-three/drei';
+import React, { useMemo } from 'react';
 import * as THREE from 'three';
+import Label3D from './Label3D';
+import type { BedExtents } from '../../utils/machineGeometry';
 
 interface MachineBedProps {
-    limits?: {
-        x: { min: number, max: number };
-        y: { min: number, max: number };
-        z: { min: number, max: number };
-    };
-    width?: number;
-    height?: number;
+    bed: BedExtents;
     visible?: boolean;
-    origin?: 'bottom-left' | 'top-left' | 'top-right' | 'bottom-right';
+    showEnvelope?: boolean;
 }
 
-const MachineBed: React.FC<MachineBedProps & { axesSettings?: any }> = ({ limits, width, height, visible = true, origin = 'bottom-left', axesSettings }) => {
-    // defaults: prioritize passed width/height, then limits, then 200 fallback
-    const xMax = width || limits?.x?.max || 200;
-    const yMax = height || limits?.y?.max || 200;
+const BED_THICKNESS = 4;
 
-    // Calculate Offset based on Origin
-    let xOffset = xMax / 2;
-    let yOffset = yMax / 2;
+/** Builds an XY grid (z = const) as line segments, snapped to absolute multiples of `step`. */
+function gridGeometry(bed: BedExtents, step: number, z: number) {
+    const pts: number[] = [];
+    const x0 = Math.ceil(bed.minX / step) * step;
+    const y0 = Math.ceil(bed.minY / step) * step;
+    for (let x = x0; x <= bed.maxX + 1e-6; x += step) pts.push(x, bed.minY, z, x, bed.maxY, z);
+    for (let y = y0; y <= bed.maxY + 1e-6; y += step) pts.push(bed.minX, y, z, bed.maxX, y, z);
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+    return g;
+}
 
-    if (origin === 'top-left') {
-        xOffset = xMax / 2;
-        yOffset = -yMax / 2;
-    } else if (origin === 'top-right') {
-        xOffset = -xMax / 2;
-        yOffset = -yMax / 2;
-    } else if (origin === 'bottom-right') {
-        xOffset = -xMax / 2;
-        yOffset = yMax / 2;
-    }
+/** Arrow along +axis with a label; the scene is native Z-up so these are true machine axes. */
+const AxisArrow: React.FC<{ dir: [number, number, number]; color: string; label: string; length: number }> = ({ dir, color, label, length }) => {
+    const quat = useMemo(() => new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(...dir)), [dir]);
+    const head = length * 0.22;
+    const shaft = length - head;
+    return (
+        <group quaternion={quat}>
+            <mesh position={[0, shaft / 2, 0]}>
+                <cylinderGeometry args={[0.7, 0.7, shaft, 12]} />
+                <meshBasicMaterial color={color} toneMapped={false} />
+            </mesh>
+            <mesh position={[0, shaft + head / 2, 0]}>
+                <coneGeometry args={[2.2, head, 16]} />
+                <meshBasicMaterial color={color} toneMapped={false} />
+            </mesh>
+            <Label3D text={label} position={[0, length + 6, 0]} color={color} size={7} />
+        </group>
+    );
+};
 
-    // Arrow Logic
-    const arrowLength = 40;
-    const xDir = new THREE.Vector3(axesSettings?.x?.reversed ? -1 : 1, 0, 0);
-    const yDir = new THREE.Vector3(0, axesSettings?.y?.reversed ? -1 : 1, 0);
-    const zDir = new THREE.Vector3(0, 0, axesSettings?.z?.reversed ? -1 : 1);
+export const OriginTriad: React.FC<{ length?: number }> = ({ length = 35 }) => (
+    <group>
+        <AxisArrow dir={[1, 0, 0]} color="#ef4444" label="X" length={length} />
+        <AxisArrow dir={[0, 1, 0]} color="#22c55e" label="Y" length={length} />
+        <AxisArrow dir={[0, 0, 1]} color="#3b82f6" label="Z" length={length} />
+        <mesh>
+            <sphereGeometry args={[1.6, 16, 16]} />
+            <meshBasicMaterial color="#f8fafc" />
+        </mesh>
+    </group>
+);
 
-    const xColor = axesSettings?.x?.reversed ? '#ff6b6b' : 'red';
-    const yColor = axesSettings?.y?.reversed ? '#69db7c' : 'green';
-    const zColor = axesSettings?.z?.reversed ? '#4dabf7' : 'blue';
+const MachineBed: React.FC<MachineBedProps> = ({ bed, visible = true, showEnvelope = true }) => {
+    const minor = useMemo(() => gridGeometry(bed, 10, 0.02), [bed]);
+    const major = useMemo(() => gridGeometry(bed, 50, 0.04), [bed]);
+    const outline = useMemo(() => {
+        const g = new THREE.BufferGeometry();
+        const { minX: a, maxX: b, minY: c, maxY: d } = bed;
+        g.setAttribute('position', new THREE.Float32BufferAttribute([a, c, 0.06, b, c, 0.06, b, d, 0.06, a, d, 0.06], 3));
+        return g;
+    }, [bed]);
+    const envelope = useMemo(
+        () => new THREE.EdgesGeometry(new THREE.BoxGeometry(bed.width, bed.height, bed.depth)),
+        [bed.width, bed.height, bed.depth]
+    );
+
+    const ticks = useMemo(() => {
+        const step = Math.max(bed.width, bed.height) > 600 ? 100 : 50;
+        const xs: number[] = [];
+        const ys: number[] = [];
+        for (let x = Math.ceil(bed.minX / step) * step; x <= bed.maxX + 1e-6; x += step) if (x !== 0) xs.push(x);
+        for (let y = Math.ceil(bed.minY / step) * step; y <= bed.maxY + 1e-6; y += step) if (y !== 0) ys.push(y);
+        return { xs, ys };
+    }, [bed]);
+
+    // Rulers sit on the edges that touch the origin so the numbers read from (0,0).
+    const rulerY = bed.minY === 0 ? bed.minY - 7 : bed.maxY + 7;
+    const rulerX = bed.minX === 0 ? bed.minX - 9 : bed.maxX + 9;
 
     return (
         <group>
             {visible && (
                 <>
-                    {/* Outer Grid */}
-                    <Grid
-                        position={[xOffset, yOffset, -0.05]}
-                        args={[xMax, yMax]}
-                        rotation={[Math.PI / 2, 0, 0]}
-                        cellSize={50}
-                        sectionSize={100}
-                        sectionColor="#003366"
-                        cellColor="#003366"
-                        sectionThickness={1.0}
-                        cellThickness={0.6}
-                        infiniteGrid
-                        fadeDistance={1200}
-                    />
-
-                    {/* Inner Grid */}
-                    <Grid
-                        position={[xOffset, yOffset, 0.1]}
-                        args={[xMax, yMax]}
-                        rotation={[Math.PI / 2, 0, 0]}
-                        cellSize={50}
-                        sectionSize={100}
-                        sectionColor="#06b6d4"
-                        cellColor="#1e3a8a"
-                        sectionThickness={1.0}
-                        cellThickness={0.5}
-                        infiniteGrid={false}
-                    />
-
-                    {/* Physical Bed */}
-                    <mesh position={[xOffset, yOffset, -0.5]} receiveShadow>
-                        <planeGeometry args={[xMax, yMax]} />
-                        <meshStandardMaterial color="#e5e7eb" roughness={0.5} metalness={0.1} />
+                    <mesh position={[bed.centerX, bed.centerY, -BED_THICKNESS / 2]} receiveShadow>
+                        <boxGeometry args={[bed.width, bed.height, BED_THICKNESS]} />
+                        <meshStandardMaterial color="#d9dee5" roughness={0.85} metalness={0.05} />
                     </mesh>
-
-                    {/* Bed Border */}
-                    <lineSegments position={[xOffset, yOffset, 0]}>
-                        <edgesGeometry args={[new THREE.BoxGeometry(xMax, yMax, 1)]} />
-                        <lineBasicMaterial color="#06b6d4" linewidth={2} toneMapped={false} />
+                    <lineSegments geometry={minor}>
+                        <lineBasicMaterial color="#b9c2ce" />
                     </lineSegments>
+                    <lineSegments geometry={major}>
+                        <lineBasicMaterial color="#8794a6" />
+                    </lineSegments>
+                    <lineLoop geometry={outline}>
+                        <lineBasicMaterial color="#0891b2" />
+                    </lineLoop>
+                    {showEnvelope && (
+                        <lineSegments geometry={envelope} position={[bed.centerX, bed.centerY, bed.depth / 2]}>
+                            <lineBasicMaterial color="#334155" transparent opacity={0.6} />
+                        </lineSegments>
+                    )}
+                    {ticks.xs.map(x => (
+                        <Label3D key={`x${x}`} text={`${x}`} position={[x, rulerY, 0.5]} size={5} color="#94a3b8" />
+                    ))}
+                    {ticks.ys.map(y => (
+                        <Label3D key={`y${y}`} text={`${y}`} position={[rulerX, y, 0.5]} size={5} color="#94a3b8" />
+                    ))}
                 </>
             )}
-
-            {/* Dynamic Axes Arrows */}
-            {/* X */}
-            <arrowHelper args={[xDir, new THREE.Vector3(0, 0, 0), arrowLength, xColor, 10, 5]} />
-            <Text position={[xDir.x * (arrowLength + 5), 0, 0]} fontSize={8} color={xColor} anchorX="center" anchorY="middle">
-                X
-            </Text>
-
-            {/* Y */}
-            <arrowHelper args={[yDir, new THREE.Vector3(0, 0, 0), arrowLength, yColor, 10, 5]} />
-            <Text position={[0, yDir.y * (arrowLength + 5), 0]} fontSize={8} color={yColor} anchorX="center" anchorY="middle">
-                Y
-            </Text>
-
-            {/* Z */}
-            <arrowHelper args={[zDir, new THREE.Vector3(0, 0, 0), arrowLength, zColor, 10, 5]} />
-            <Text position={[0, 0, zDir.z * (arrowLength + 5)]} fontSize={8} color={zColor} anchorX="center" anchorY="middle">
-                Z
-            </Text>
-
-            {/* Box Origin Marker */}
-            <mesh position={[0, 0, 0]}>
-                <boxGeometry args={[4, 4, 4]} />
-                <meshStandardMaterial color="white" />
-            </mesh>
+            <OriginTriad />
         </group>
     );
 };

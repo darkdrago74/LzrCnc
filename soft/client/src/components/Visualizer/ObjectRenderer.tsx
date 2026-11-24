@@ -1,57 +1,71 @@
 import React, { useMemo, forwardRef } from 'react';
 import * as THREE from 'three';
 import { useLoader } from '@react-three/fiber';
-import { Edges } from '@react-three/drei';
 import type { SceneObject } from '../../types';
+import { getSvgInfo, svgForTexture } from '../../utils/svgUtils';
+import GCodeViewer from './GCodeViewer';
 
-const ObjectRenderer = forwardRef<THREE.Group, { object: SceneObject; selected: boolean; onSelect: () => void }>(({ object, selected, onSelect }, ref) => {
-    // Load Texture for images/SVGs
-    const textureUrl = useMemo(() => {
-        if (object.type === 'stl') return null;
-        if (object.content.startsWith('http') || object.content.startsWith('blob:') || object.content.startsWith('data:')) {
-            return object.content;
-        }
-        // Assume SVG string
-        const blob = new Blob([object.content], { type: 'image/svg+xml' });
-        return URL.createObjectURL(blob);
-    }, [object.content, object.type]);
+interface Props { object: SceneObject; selected: boolean; onSelect: () => void }
 
-    const texture = useLoader(THREE.TextureLoader, textureUrl || '');
+const DEG = Math.PI / 180;
 
-    // Calculate Aspect Ratio / Dimensions
-    // Default 100mm if no info
-    const width = 100;
-    const height = texture.image ? width * (texture.image.height / texture.image.width) : 100;
+const isUrl = (s: string) => /^(https?:|blob:|data:)/.test(s);
 
-    if (object.type === 'stl') {
-        return <group ref={ref} />; // Layout placeholder for STL
+/** Textured plane lying on the XY bed, centered on the object position. */
+const TexturedPlane: React.FC<{ object: SceneObject; selected: boolean }> = ({ object, selected }) => {
+    // A deterministic data URL (not a blob URL) is required: useLoader suspends, and a suspended first
+    // render discards memoized values, so a fresh blob URL per attempt would never resolve.
+    const { url, svgSize } = useMemo(() => {
+        if (isUrl(object.content)) return { url: object.content, svgSize: null as null | [number, number] };
+        const info = getSvgInfo(object.content, object.svgUnitsMm);
+        const url = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgForTexture(object.content, info));
+        return { url, svgSize: [info.widthMm, info.heightMm] as [number, number] };
+    }, [object.content, object.svgUnitsMm]);
+
+    const texture = useLoader(THREE.TextureLoader, url);
+    useMemo(() => { texture.colorSpace = THREE.SRGBColorSpace; texture.anisotropy = 8; }, [texture]);
+
+    const img = texture.image as { width: number; height: number } | undefined;
+    const [w, h] = object.size ?? svgSize ?? (img ? [img.width * 25.4 / 96, img.height * 25.4 / 96] : [100, 100]);
+
+    return (
+        <group>
+            <mesh>
+                <planeGeometry args={[w, h]} />
+                <meshBasicMaterial map={texture} transparent toneMapped={false} side={THREE.DoubleSide} depthWrite={false} />
+            </mesh>
+            {selected && (
+                <lineSegments position={[0, 0, 0.05]}>
+                    <edgesGeometry args={[new THREE.PlaneGeometry(w, h)]} />
+                    <lineBasicMaterial color="#3b82f6" toneMapped={false} />
+                </lineSegments>
+            )}
+        </group>
+    );
+};
+
+const ObjectRenderer = forwardRef<THREE.Group, Props>(({ object, selected, onSelect }, ref) => {
+    if (object.type === 'stl') return <group ref={ref} />;
+
+    if (object.type === 'gcode') {
+        const o = object.gcodeOptions;
+        return (
+            <group ref={ref} position={[o?.offsetX ?? 0, o?.offsetY ?? 0, 0]}>
+                <GCodeViewer gcode={object.content.split(/\r?\n/)} />
+            </group>
+        );
     }
 
     return (
         <group
             ref={ref}
-            position={new THREE.Vector3(...object.position)}
-            rotation={new THREE.Euler((object.rotation[0] * Math.PI) / 180, (object.rotation[1] * Math.PI) / 180, (object.rotation[2] * Math.PI) / 180)}
-            scale={new THREE.Vector3(...object.scale)}
+            // Slightly above the bed so the artwork never z-fights with the grid
+            position={[object.position[0], object.position[1], (object.position[2] || 0) + 0.1]}
+            rotation={[object.rotation[0] * DEG, object.rotation[1] * DEG, object.rotation[2] * DEG]}
+            scale={object.scale}
             onClick={(e) => { e.stopPropagation(); onSelect(); }}
         >
-            {/* Main Plane */}
-            <mesh>
-                <planeGeometry args={[width, height]} />
-                <meshBasicMaterial map={texture} transparent side={THREE.DoubleSide} />
-            </mesh>
-
-            {/* Selection Highlight */}
-            {selected && (
-                <mesh position={[0, 0, 0.1]}>
-                    <planeGeometry args={[width, height]} />
-                    <meshBasicMaterial color="#3b82f6" transparent opacity={0.2} side={THREE.DoubleSide} depthTest={false} />
-                    <Edges scale={1.0} color="#3b82f6" />
-                </mesh>
-            )}
-
-            {/* Debug Axis */}
-            {selected && <axesHelper args={[50]} />}
+            <TexturedPlane object={object} selected={selected} />
         </group>
     );
 });

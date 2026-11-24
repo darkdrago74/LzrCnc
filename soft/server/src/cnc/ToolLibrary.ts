@@ -16,6 +16,8 @@ const DEFAULT_TOOLS: CncTool[] = [
     { id: 't1', name: '1/8" Endmill', type: 'endmill', diameter: 3.175, flutes: 2, material: 'carbide' },
     { id: 't2', name: '1/4" Endmill', type: 'endmill', diameter: 6.35, flutes: 2, material: 'carbide' },
     { id: 't3', name: '6mm Ballnose', type: 'ballnose', diameter: 6.0, flutes: 2, material: 'carbide' },
+    { id: 't4', name: '6mm Flat Endmill', type: 'endmill', diameter: 6.0, flutes: 2, material: 'carbide', maxRPM: 24000 },
+    { id: 't5', name: '3mm Flat Endmill', type: 'endmill', diameter: 3.0, flutes: 2, material: 'carbide', maxRPM: 24000 },
 ];
 
 export class ToolLibrary {

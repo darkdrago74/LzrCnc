@@ -1,54 +1,35 @@
-#!/bin/bash
+#!/usr/bin/env bash
+# LzrCnc update: pull the latest code (git checkouts), refresh packages, rebuild the UI.
+# Usage: bash install/update.sh      (also called by Settings -> System Updates)
+# User data in soft/server/data is never touched.
 
-# LzrCnc Update Script
-# Usage: ./update.sh
+set -u
+INSTALL_DIR="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
+ROOT="$(cd "$INSTALL_DIR/.." && pwd)"
+SOFT="$ROOT/soft"
+LOG_FILE="$INSTALL_DIR/update.log"
+: > "$LOG_FILE"
 
-LOG_FILE="$(pwd)/update.log"
-echo "==========================================" > "$LOG_FILE"
-echo "LzrCnc Update Process: $(date)" >> "$LOG_FILE"
-echo "==========================================" >> "$LOG_FILE"
+log() { echo "[$1] $2"; echo "[$(date '+%F %T')] [$1] $2" >> "$LOG_FILE"; }
 
-log() {
-    local level=$1
-    local msg=$2
-    echo "[$level] $msg"
-    echo "[$level] $msg" >> "$LOG_FILE"
-}
-
-# Ensure we are in the project root
-cd "$(dirname "$0")"
-
-# 1. Git Pull
-log "INFO" "Pulling changes from origin..."
-# Fetch first to ensure we know about upstream
-if git fetch; then
-    if git pull; then
-        log "INFO" "Git pull successful."
-    else
-        log "ERROR" "Git pull failed. You may have local changes that conflict."
-        exit 1
-    fi
-else
-    log "ERROR" "Git fetch failed. Check internet connection."
+if [ "$(id -u)" -eq 0 ] && [ -n "${SUDO_USER:-}" ]; then
+    log "ERROR" "Run update.sh as your normal user (not with sudo), so files keep the right owner."
     exit 1
 fi
 
-# 2. Install Dependencies (Root)
-log "INFO" "Installing dependencies..."
-if npm install; then
-    log "INFO" "Dependencies installed."
+cd "$ROOT" || exit 1
+if [ -d .git ]; then
+    log "INFO" "Pulling changes..."
+    git pull --ff-only >> "$LOG_FILE" 2>&1 || { log "ERROR" "git pull failed (local changes?). See $LOG_FILE"; exit 1; }
+    log "INFO" "Now at $(git rev-parse --short HEAD)"
 else
-    log "ERROR" "npm install failed."
-    exit 1
+    log "INFO" "Not a git checkout - skipping download (copy the new files over this folder, then re-run)."
 fi
 
-# 3. Build Project
-log "INFO" "Building project..."
-if npm run build; then
-    log "INFO" "Build successful."
-else
-    log "ERROR" "Build failed."
-    exit 1
-fi
+cd "$SOFT" || exit 1
+log "INFO" "Installing packages..."
+npm install --no-audit --no-fund >> "$LOG_FILE" 2>&1 || { log "ERROR" "npm install failed. See $LOG_FILE"; exit 1; }
+log "INFO" "Building the web UI..."
+npm run build:fast --workspace=client >> "$LOG_FILE" 2>&1 || { log "ERROR" "Build failed. See $LOG_FILE"; exit 1; }
 
-log "SUCCESS" "Update complete."
+log "SUCCESS" "Update complete. Restart LzrCnc (lzrcnc, or: sudo systemctl restart lzrcnc)."

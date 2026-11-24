@@ -1,238 +1,221 @@
-# Check for root privileges
-if [ "$EUID" -ne 0 ]; then
-  echo "Please run as root (sudo ./install.sh)"
-  exit 1
+#!/usr/bin/env bash
+# LzrCnc installer for Linux
+#   Debian / Ubuntu / Raspberry Pi OS (apt) and Fedora / RHEL-like (dnf).
+#
+# Usage:  sudo bash install/install.sh [--service | --no-service]
+#   --service     start LzrCnc automatically at boot (systemd)
+#   --no-service  do not ask about the boot service
+# (AUTOBOOT=y|n is also accepted for backwards compatibility.)
+
+set -u
+
+SELF="$(readlink -f "${BASH_SOURCE[0]}")"
+INSTALL_DIR="$(dirname "$SELF")"
+ROOT="$(cd "$INSTALL_DIR/.." && pwd)"
+SOFT="$ROOT/soft"
+PORT=3001
+LOG_FILE="$INSTALL_DIR/install_report.log"
+NODE_MAJOR=22          # LTS line installed when Node is missing / too old
+
+SERVICE_CHOICE="${AUTOBOOT:-}"
+for arg in "$@"; do
+    case "$arg" in
+        --service) SERVICE_CHOICE=y ;;
+        --no-service) SERVICE_CHOICE=n ;;
+        -h|--help) sed -n '2,9p' "$SELF" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    esac
+done
+
+if [ "$(id -u)" -ne 0 ]; then
+    echo "Please run as root:  sudo bash $SELF"
+    exit 1
 fi
 
-LOG_FILE="$(pwd)/install_report.log"
+TARGET_USER="${SUDO_USER:-root}"
+TARGET_HOME="$(getent passwd "$TARGET_USER" | cut -d: -f6)"
+TARGET_GROUP="$(id -gn "$TARGET_USER")"
 
-# Initialize Log
-echo "==========================================" > "$LOG_FILE"
-echo "LzrCnc Installation Report" >> "$LOG_FILE"
-echo "Date: $(date)" >> "$LOG_FILE"
-echo "==========================================" >> "$LOG_FILE"
-echo "" >> "$LOG_FILE"
+: > "$LOG_FILE"
+log() {
+    echo "[$1] $2"
+    echo "[$(date '+%F %T')] [$1] $2" >> "$LOG_FILE"
+}
+fail() { log "FAILED" "$1"; echo "See $LOG_FILE"; exit 1; }
 
-# Logging Function
-log_action() {
-    local status="$1"
-    local package="$2"
-    local message="$3"
-    local timestamp=$(date "+%H:%M:%S")
-    
-    # Print to console
-    echo "[$status] $package: $message"
-    
-    # Append to log
-    echo "[$timestamp] [$status] $package: $message" >> "$LOG_FILE"
+# Run a command as the real (non-root) user so node_modules are not owned by root
+as_user() {
+    if [ "$TARGET_USER" = "root" ]; then
+        "$@"
+    else
+        runuser -u "$TARGET_USER" -- env HOME="$TARGET_HOME" PATH="$PATH" "$@"
+    fi
 }
 
-echo "Installing LzrCnc Dependencies..."
+log "INFO" "LzrCnc install - project: $ROOT - user: $TARGET_USER"
 
-# 1. Install System Dependencies from requirement-simple.txt
-if [ -f "requirement-simple.txt" ]; then
-    echo "Installing system packages from requirement-simple.txt..."
-    # Read non-empty lines, skip comments if any
-    while IFS= read -r package || [ -n "$package" ]; do
-        [[ $package =~ ^#.* ]] && continue
-        [ -z "$package" ] && continue
-        
-        # Smart Check for Node.js - SKIP here, handled specifically later
-        if [ "$package" == "nodejs" ] || [ "$package" == "npm" ]; then
-             continue
-        fi
-
-        # Determine package manager (assuming apt for Debian/RPi as per requirements)
-        if command -v apt-get &> /dev/null; then
-             # Try install
-             if apt-get install -y "$package"; then
-                 log_action "INSTALLED" "$package" "Successfully installed via apt-get."
-             else
-                 log_action "FAILED" "$package" "apt-get install failed."
-             fi
-        else
-            log_action "FAILED" "$package" "apt-get not found."
-        fi
-    done < "requirement-simple.txt"
+# ---------------------------------------------------------------- 1. system packages
+if command -v apt-get >/dev/null 2>&1; then
+    PKG=apt
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update -y >> "$LOG_FILE" 2>&1 || log "WARNING" "apt-get update failed"
+    PACKAGES="ca-certificates curl git xz-utils build-essential python3 iproute2 lsof"
+    # shellcheck disable=SC2086
+    apt-get install -y $PACKAGES >> "$LOG_FILE" 2>&1 || fail "apt-get install $PACKAGES"
+elif command -v dnf >/dev/null 2>&1; then
+    PKG=dnf
+    PACKAGES="ca-certificates curl git xz gcc-c++ make python3 iproute lsof findutils procps-ng"
+    # shellcheck disable=SC2086
+    dnf install -y $PACKAGES >> "$LOG_FILE" 2>&1 || fail "dnf install $PACKAGES"
 else
-    log_action "WARNING" "requirement-simple.txt" "File not found."
+    PKG=none
+    log "WARNING" "No apt-get or dnf found: install curl, git, a C++ compiler and Node.js 22 yourself."
 fi
+log "INSTALLED" "system packages ($PKG)"
 
-# 2. Check for Node.js Version (Need 20+)
-# 2. Ensure Node.js v24 (via NodeSource)
-REQUIRED_NODE_MAJOR=20
-CURRENT_NODE_VALID=false
+# ---------------------------------------------------------------- 2. Node.js
+node_ok() {
+    command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1 || return 1
+    local v major minor
+    v="$(node -v | sed 's/^v//')"; major="${v%%.*}"; minor="$(echo "$v" | cut -d. -f2)"
+    [ "$major" -ge 23 ] && return 0
+    [ "$major" -eq 22 ] && [ "$minor" -ge 12 ] && return 0
+    [ "$major" -eq 20 ] && [ "$minor" -ge 19 ] && return 0
+    return 1
+}
 
-if command -v node &> /dev/null; then
-    NODE_VERSION=$(node -v | cut -d'v' -f2)
-    NODE_MAJOR=$(echo "$NODE_VERSION" | cut -d'.' -f1)
-    
-    if [ "$NODE_MAJOR" -ge "$REQUIRED_NODE_MAJOR" ]; then
-        log_action "CHECK" "Node.js" "Version $NODE_VERSION is valid (>=20)."
-        CURRENT_NODE_VALID=true
-    else
-        log_action "INFO" "Node.js" "Version $NODE_VERSION is too old. Upgrading..."
-    fi
-fi
+# Official nodejs.org binaries: works on any distro (x64, arm64, armv7l)
+install_node_tarball() {
+    local arch file url
+    case "$(uname -m)" in
+        x86_64)  arch=x64 ;;
+        aarch64|arm64) arch=arm64 ;;
+        armv7l)  arch=armv7l ;;
+        armv6l)  fail "ARMv6 (Raspberry Pi Zero / 1) is not supported by Node.js 20+. Use a Pi 3/4/5 or Zero 2 with a 64-bit OS." ;;
+        *)       fail "Unsupported CPU $(uname -m) for Node.js binaries" ;;
+    esac
+    url="https://nodejs.org/dist/latest-v${NODE_MAJOR}.x"
+    file="$(curl -fsSL "$url/SHASUMS256.txt" | sed 's/^[0-9a-f]* *//' | grep -E "^node-v[0-9.]+-linux-${arch}\.tar\.xz$" | head -1)"
+    [ -n "$file" ] || fail "Could not find a Node.js $NODE_MAJOR download for linux-$arch"
+    log "INFO" "Downloading $file"
+    local tmp; tmp="$(mktemp -d)"
+    curl -fsSL "$url/$file" -o "$tmp/$file" || fail "download $file"
+    (cd "$tmp" && curl -fsSL "$url/SHASUMS256.txt" | grep " $file\$" | sha256sum -c -) >> "$LOG_FILE" 2>&1 || fail "checksum of $file"
+    tar -xJf "$tmp/$file" -C /usr/local --strip-components=1 --no-same-owner || fail "extract $file"
+    rm -rf "$tmp"
+    hash -r
+}
 
-if [ "$CURRENT_NODE_VALID" = false ]; then
-    ARCH=$(dpkg --print-architecture 2>/dev/null || uname -m)
-    echo "Detected Architecture: $ARCH"
-
-    NODE_MAJOR_VERSION="24"
-    
-    # Check for 32-bit ARM (armhf/armv7l)
-    if [[ "$ARCH" == "armhf" || "$ARCH" == "armv7l" ]]; then
-        echo "----------------------------------------------------------------"
-        echo "WARNING: 32-bit ARM ($ARCH) detected."
-        echo "Node.js 24 is not supported on 32-bit ARM by NodeSource."
-        echo "RECOMMENDATION: Use Raspberry Pi OS 64-bit (arm64) for best performance."
-        echo "----------------------------------------------------------------"
-        echo "Falling back to Node.js 20 (LTS) for compatibility..."
-        NODE_MAJOR_VERSION="20"
-    fi
-
-    echo "Installing Node.js v${NODE_MAJOR_VERSION} via NodeSource..."
-    # 1. Download and run the setup script
-    if curl -fsSL https://deb.nodesource.com/setup_${NODE_MAJOR_VERSION}.x | bash -; then
-        # 2. Install nodejs
-        if apt-get install -y nodejs; then
-            log_action "INSTALLED" "Node.js" "Successfully installed v${NODE_MAJOR_VERSION}."
-        else
-            log_action "FAILED" "Node.js" "apt-get install nodejs failed."
-            exit 1
-        fi
-    else
-        log_action "FAILED" "Node.js" "NodeSource setup script failed."
-        exit 1
-    fi
-fi
-
-# 3. Install Root Dependencies
-echo "Installing Root Packages..."
-if [ -f "package.json" ]; then
-    if npm install; then
-        log_action "INSTALLED" "npm-root" "Root dependencies installed."
-    else
-        log_action "FAILED" "npm-root" "npm install failed."
-        exit 1
-    fi
-else 
-    log_action "FAILED" "package.json" "Not found in root."
-    exit 1
-fi
-
-# 4. Install Server Dependencies
-echo "Installing Server Packages..."
-if [ -d "server" ]; then
-    cd server
-    if npm install; then
-        log_action "INSTALLED" "npm-server" "Server dependencies installed."
-        # Build if script exists
-        if npm run | grep -q "build"; then
-            if npm run build; then
-                log_action "BUILT" "server" "Build successful."
-            else
-                log_action "FAILED" "server" "Build failed."
-            fi
-        else
-            log_action "SKIPPED" "server-build" "No build script found."
-        fi
-    else
-        log_action "FAILED" "npm-server" "Server npm install failed."
-        exit 1
-    fi
-    cd ..
+if node_ok; then
+    log "CHECK" "Node.js $(node -v) is OK"
 else
-    log_action "FAILED" "server-dir" "Directory not found."
-    exit 1
-fi
-
-# 5. Install Client Dependencies
-echo "Installing Client Packages..."
-if [ -d "client" ]; then
-    cd client
-    if npm install; then
-        log_action "INSTALLED" "npm-client" "Client dependencies installed."
-        if npm run build; then
-            log_action "BUILT" "client" "Client build successful."
-        else
-            log_action "FAILED" "client" "Client build failed."
-        fi
-    else
-        log_action "FAILED" "npm-client" "Client npm install failed."
-        exit 1
+    log "INFO" "Node.js missing or older than 20.19 - installing Node.js $NODE_MAJOR"
+    [ "${LZRCNC_NODE_TARBALL:-}" = "1" ] && PKG_NODE=none || PKG_NODE="$PKG"
+    case "$PKG_NODE" in
+        apt)
+            if [ "$(uname -m)" = "x86_64" ] || [ "$(uname -m)" = "aarch64" ]; then
+                if curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" | bash - >> "$LOG_FILE" 2>&1 \
+                    && apt-get install -y nodejs >> "$LOG_FILE" 2>&1; then
+                    log "INSTALLED" "Node.js $(node -v) (NodeSource)"
+                fi
+            fi ;;
+        dnf)
+            dnf install -y nodejs npm >> "$LOG_FILE" 2>&1 || true
+            node_ok || dnf install -y "nodejs${NODE_MAJOR}" "nodejs${NODE_MAJOR}-npm" >> "$LOG_FILE" 2>&1 || true ;;
+    esac
+    hash -r
+    if ! node_ok; then
+        install_node_tarball
     fi
-    cd ..
-else
-    log_action "FAILED" "client-dir" "Directory not found."
-    exit 1
+    node_ok || fail "Node.js installation (found: $(node -v 2>/dev/null || echo none))"
+    log "INSTALLED" "Node.js $(node -v) at $(command -v node)"
+fi
+NODE_BIN="$(command -v node)"
+
+# ---------------------------------------------------------------- 3. app dependencies + build
+[ -f "$SOFT/package.json" ] || fail "soft/package.json not found (is the project complete?)"
+chown -R "$TARGET_USER:$TARGET_GROUP" "$ROOT"
+chmod +x "$ROOT"/*.sh "$INSTALL_DIR"/*.sh 2>/dev/null || true
+
+log "INFO" "Installing npm packages (this can take several minutes on a Raspberry Pi)"
+cd "$SOFT" || fail "cd $SOFT"
+if ! as_user npm ci --no-audit --no-fund >> "$LOG_FILE" 2>&1; then
+    log "WARNING" "npm ci failed, retrying with npm install"
+    as_user npm install --no-audit --no-fund >> "$LOG_FILE" 2>&1 || fail "npm install"
+fi
+log "INSTALLED" "npm packages"
+
+log "INFO" "Building the web UI"
+as_user npm run build:fast --workspace=client >> "$LOG_FILE" 2>&1 || fail "client build"
+log "BUILT" "client (soft/client/dist)"
+
+# ---------------------------------------------------------------- 4. serial port access
+SERIAL_GROUP=""
+for g in dialout uucp; do getent group "$g" >/dev/null && { SERIAL_GROUP="$g"; break; }; done
+if [ -n "$SERIAL_GROUP" ] && [ "$TARGET_USER" != "root" ]; then
+    if id -nG "$TARGET_USER" | tr ' ' '\n' | grep -qx "$SERIAL_GROUP"; then
+        log "CHECK" "$TARGET_USER is in the '$SERIAL_GROUP' group (USB serial access)"
+    else
+        usermod -aG "$SERIAL_GROUP" "$TARGET_USER" && \
+            log "ADDED" "$TARGET_USER to '$SERIAL_GROUP' for USB serial access (log out/in to apply)"
+    fi
 fi
 
+# ---------------------------------------------------------------- 5. global command
+ln -sf "$ROOT/lzrcnc.sh" /usr/local/bin/lzrcnc && log "CREATED" "command 'lzrcnc' (/usr/local/bin/lzrcnc)"
 
-# 6. Setup Autoboot (Systemd)
-echo "------------------------------------------"
-if [ -n "$AUTOBOOT" ]; then
-    response="$AUTOBOOT"
-else
-    read -p "Do you want LzrCnc to start automatically on boot? [y/N] " response
+# ---------------------------------------------------------------- 6. firewall (Fedora)
+if command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state >/dev/null 2>&1; then
+    firewall-cmd --permanent --add-port=${PORT}/tcp >> "$LOG_FILE" 2>&1 && firewall-cmd --reload >> "$LOG_FILE" 2>&1 \
+        && log "OPENED" "firewall port $PORT/tcp"
 fi
-if [[ "$response" =~ ^([yY][eE][sS]|[yY])$ ]]; then
-    echo "Configuring Systemd Service..."
-    
-    SERVICE_FILE="/etc/systemd/system/lzrcnc.service"
-    APP_DIR=$(pwd)
-    USER_NAME=${SUDO_USER:-root}
-    NODE_PATH=$(which node)
-    
-    # Create Service File
-    cat <<EOT > "$SERVICE_FILE"
+
+# ---------------------------------------------------------------- 7. boot service
+if [ -z "$SERVICE_CHOICE" ]; then
+    if [ -t 0 ]; then
+        read -r -p "Start LzrCnc automatically at boot (systemd service)? [y/N] " SERVICE_CHOICE
+    else
+        SERVICE_CHOICE=n
+    fi
+fi
+if [[ "$SERVICE_CHOICE" =~ ^([yY]|[yY][eE][sS])$ ]]; then
+    if [ ! -d /run/systemd/system ]; then
+        log "SKIPPED" "systemd is not running on this system - start LzrCnc with 'lzrcnc'"
+    else
+        SUPP=""
+        [ -n "$SERIAL_GROUP" ] && SUPP="SupplementaryGroups=$SERIAL_GROUP"
+        cat > /etc/systemd/system/lzrcnc.service <<EOT
 [Unit]
-Description=LzrCnc Server
-After=network.target
+Description=LzrCnc laser / CNC server
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
-User=$USER_NAME
-WorkingDirectory=$APP_DIR
-ExecStart=$NODE_PATH $APP_DIR/server/dist/index.js
-Restart=always
+User=$TARGET_USER
+WorkingDirectory=$SOFT/server
+Environment=PORT=$PORT
 Environment=NODE_ENV=production
-Environment=PORT=3000
+Environment=PATH=$(dirname "$NODE_BIN"):/usr/local/bin:/usr/bin:/bin
+$SUPP
+ExecStart=$NODE_BIN --disable-warning=DEP0205 --import tsx src/index.ts
+Restart=always
+RestartSec=3
 
 [Install]
 WantedBy=multi-user.target
 EOT
-
-    # Reload and Enable
-    systemctl daemon-reload
-    systemctl enable lzrcnc
-    systemctl start lzrcnc
-    
-    log_action "ENABLED" "systemd" "Service created and started."
-    echo "Service enabled! You can verify with: systemctl status lzrcnc"
+        systemctl daemon-reload
+        systemctl enable --now lzrcnc >> "$LOG_FILE" 2>&1 && log "ENABLED" "systemd service 'lzrcnc' (sudo systemctl status lzrcnc)"
+    fi
 else
-    echo "Skipping autoboot setup."
+    log "SKIPPED" "boot service (start manually with: lzrcnc)"
 fi
 
-# 7. Final Polish
-echo "Finalizing Setup..."
-
-# Create Global Symlink
-if ln -sf "$(pwd)/lzrcnc_start.sh" /usr/local/bin/lzrcnc; then
-    chmod +x /usr/local/bin/lzrcnc
-    log_action "CREATED" "symlink" "Global command 'lzrcnc' enabled."
-else
-    log_action "WARNING" "symlink" "Failed to create /usr/local/bin/lzrcnc"
-fi
-
-# Fix Permissions (Restore ownership to sudo user)
-# This prevents root-locked files from checking out the repo or running npm as user later.
-TARGET_USER=${SUDO_USER:-$(whoami)}
-if [ "$TARGET_USER" != "root" ]; then
-    echo "Fixing permissions for user: $TARGET_USER"
-    chown -R "$TARGET_USER:$TARGET_USER" "$(pwd)"
-    log_action "FIXED" "permissions" "Ownership restored to $TARGET_USER."
-fi
-
-echo "Installation Complete. See install_report.log for details."
+IP="$(hostname -I 2>/dev/null | cut -d' ' -f1)"
+echo
+echo "=========================================="
+echo " LzrCnc installed."
+echo "   Start:  lzrcnc        (or: lzrcnc sim  for the simulator)"
+echo "   Open:   http://localhost:$PORT  ${IP:+ / http://$IP:$PORT}"
+echo "   Report: $LOG_FILE"
+echo "=========================================="

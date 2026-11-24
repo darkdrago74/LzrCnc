@@ -4,12 +4,24 @@ export interface Position {
     z: number;
 }
 
+export interface JobStatus {
+    state: 'idle' | 'running' | 'paused' | 'done' | 'stopped' | 'error';
+    sent: number;
+    acked: number;
+    total: number;
+    startedAt?: number;
+    finishedAt?: number;
+    error?: string;
+    currentLine?: string;
+}
+
 export interface MachineStatus {
-    state: 'Idle' | 'Run' | 'Hold' | 'Alarm' | 'Door' | 'Check' | 'Home' | 'Sleep' | 'Disconnected' | 'Connecting';
+    state: 'Idle' | 'Run' | 'Hold' | 'Jog' | 'Alarm' | 'Door' | 'Check' | 'Home' | 'Sleep' | 'Disconnected' | 'Connecting';
     pos: Position;
     feedrate: number;
     spindle: number;
     logs: string[];
+    job?: JobStatus;
     ports?: string; // e.g. "Pn:P"
     limits?: {
         x: { min: number, max: number };
@@ -99,17 +111,27 @@ export interface RasterOptions {
     mode: 'grayscale' | 'bw' | 'dither';
 }
 
-export type ShapeType = 'rect' | 'circle' | 'ellipse' | 'polygon' | 'star';
+export type ShapeType = 'rect' | 'ellipse' | 'slot' | 'polygon' | 'star' | 'text';
 
+/** Parameters of a drawn shape; the object's content is regenerated from them when edited (see utils/shapes.ts). */
 export interface ParametricConfig {
     shape: ShapeType;
-    width?: number;       // rect, ellipse
-    height?: number;      // rect, ellipse
-    radius?: number;      // circle, polygon
-    rx?: number;          // rect rounded corners
-    ry?: number;          // rect rounded corners
+    width?: number;       // rect, ellipse, slot (mm)
+    height?: number;      // rect, ellipse, slot (mm)
+    radius?: number;      // rect corner radius (mm)
     sides?: number;       // polygon, star
-    innerRadius?: number; // star
+    /** polygon/star: construction-circle Ø, or across-flats when sizeBy = 'flats' (mm) */
+    diameter?: number;
+    sizeBy?: 'circle' | 'flats';
+    innerRadius?: number; // star inner radius, % of outer
+    angle?: number;       // polygon/star rotation (deg)
+    hole?: number;        // centre hole Ø (mm), 0 = none
+    fill?: boolean;       // filled (engrave area) instead of outline
+    text?: string;
+    font?: string;
+    bold?: boolean;
+    textHeight?: number;  // mm, font size
+    textMode?: 'raster' | 'vector';
 }
 
 export interface SceneObject {
@@ -117,9 +139,17 @@ export interface SceneObject {
     name: string;
     type: 'file' | 'rect' | 'circle' | 'text' | 'stl' | 'gcode' | 'image' | 'ellipse' | 'polygon' | 'star';
     content: string; // SVG string, DXF string, or URL
+    /** Center of the object on the bed, machine mm */
     position: [number, number, number];
+    /** Euler angles in DEGREES (only Z is used for 2D objects) */
     rotation: [number, number, number];
     scale: [number, number, number];
+    /** Unscaled physical size in mm (width, height) */
+    size?: [number, number];
+    /** SVG user units are millimetres (DXF exports) instead of CSS px */
+    svgUnitsMm?: boolean;
+    /** Laser operation this object is assigned to (default: by object kind) */
+    operationId?: string;
     selected?: boolean;
     parametric?: ParametricConfig;
     gcodeOptions?: {
@@ -128,60 +158,4 @@ export interface SceneObject {
         feedrateScale: number;
         feedrateOverride?: number;
     };
-}
-
-// ── Path analysis types (Phase 1 – milling) ──────────────────────────────────
-
-export type PathClassification =
-    | 'circle'
-    | 'ellipse'
-    | 'rectangle'
-    | 'polygon'
-    | 'closed_curve'   // closed loop containing arcs/splines
-    | 'open_curve';    // open path — tool always follows the middle line
-
-export interface PathPoint { x: number; y: number; }
-
-export type RawPrimitive =
-    | { type: 'line';     x1: number; y1: number; x2: number; y2: number }
-    | { type: 'arc';      cx: number; cy: number; radius: number; startAngle: number; endAngle: number }
-    | { type: 'circle';   cx: number; cy: number; radius: number }
-    | { type: 'polyline'; points: PathPoint[]; closed: boolean };
-
-export interface DetectedPath {
-    id: string;
-    closed: boolean;
-    classification: PathClassification;
-    /** Discretized points — direct input for THREE.BufferGeometry */
-    points: PathPoint[];
-    bounds: { minX: number; minY: number; maxX: number; maxY: number; width: number; height: number };
-    rawPrimitives: RawPrimitive[];
-}
-
-/** A milling operation assigned to a set of detected paths */
-export type CutSide = 'inside' | 'outside' | 'on';
-
-export interface MillingOperation {
-    id: string;
-    label: string;
-    pathIds: string[];
-    cutSide: CutSide;
-    /** Total depth below stock surface (positive mm) */
-    depth: number;
-    /** Depth increment per pass (positive mm) */
-    depthPerPass: number;
-    feedrate: number;
-    plungeRate: number;
-    spindleSpeed: number;
-    /** Endmill diameter in mm — used for inside/outside offset calculation */
-    toolDiameter: number;
-    /** Retract height above stock surface (mm) */
-    safeZ: number;
-}
-
-/** Computed offset polygon returned by the server after G-code generation */
-export interface ToolpathPolygon {
-    id: string;
-    points: PathPoint[];
-    cutSide: CutSide;
 }

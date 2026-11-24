@@ -1,14 +1,6 @@
-export interface MaterialPreset {
-    id: string;
-    name: string;
-    thickness: number; // mm
-    speed: number;     // mm/min
-    power: number;     // 0-100%
-    passes: number;
-    description?: string;
-}
+import { apiUrl } from '../api';
 
-const API_URL = (import.meta.env.VITE_API_URL || 'http://localhost:3001') + '/materials';
+const API_URL = apiUrl('/materials');
 
 export interface MaterialPreset {
     id: string;

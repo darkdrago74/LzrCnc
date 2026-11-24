@@ -1,90 +1,79 @@
 import React, { useState } from 'react';
 import { ToolManager } from './ToolManager';
-import FileUpload from '../FileUpload';
-import GcodePreview from '../GcodePreview';
-import { parseGcodeBounds } from '../../utils/gcodeUtils';
+import { HelpIcon } from '../ui/Tooltip';
+import { AlertTriangle } from 'lucide-react';
 
 interface CncPanelProps {
-    onGenerate: (gcode: string) => void;
-    onCommand?: (cmd: string) => void;
+    onCommand?: (cmd: string) => void | Promise<void>;
 }
 
-export const CncPanel: React.FC<CncPanelProps> = ({ onGenerate, onCommand }) => {
-    const [subTab, setSubTab] = useState<'setup' | '2.5d' | '3d'>('setup');
-    const [gcode, setGcode] = useState<string>('');
-    const [autoCenter, setAutoCenter] = useState(true);
+/** CNC router setup: Z zeroing / probing, spindle checks and the tool library. */
+export const CncPanel: React.FC<CncPanelProps> = ({ onCommand }) => {
+    const [plate, setPlate] = useState(20);
+    const [probeFeed, setProbeFeed] = useState(100);
+    const [testRpm, setTestRpm] = useState(10000);
 
-    const testZ = () => {
-        // Moves Z UP by 10mm then DOWN by 10mm
-        const cmd = `G91\nG0 Z10\nG0 Z-10\nG90`;
-        console.log("Test Z:", cmd);
-        alert("Sending Z Test: Up 10mm -> Down 10mm. If it goes DOWN first, your motor is inverted!");
+    const send = async (cmds: string[], confirmText?: string) => {
+        if (!onCommand) return;
+        if (confirmText && !confirm(confirmText)) return;
+        for (const c of cmds) await onCommand(c);
     };
 
+    const btn = 'py-2 rounded text-xs border transition-colors disabled:opacity-40';
+
     return (
-        <div className="flex flex-col space-y-4 p-2 text-white">
-            {/* Sub Tabs */}
-            <div className="flex gap-2 bg-black/20 p-1 rounded">
-                <button onClick={() => setSubTab('setup')} className={`flex-1 py-1 rounded text-xs ${subTab === 'setup' ? 'bg-orange-600 text-white' : 'text-gray-400'}`}>Setup</button>
-                <button onClick={() => setSubTab('2.5d')} className={`flex-1 py-1 rounded text-xs ${subTab === '2.5d' ? 'bg-orange-600 text-white' : 'text-gray-400'}`}>2.5D</button>
-                <button onClick={() => setSubTab('3d')} className={`flex-1 py-1 rounded text-xs ${subTab === '3d' ? 'bg-orange-600 text-white' : 'text-gray-400'}`}>3D</button>
+        <div className="flex flex-col space-y-4 text-white">
+            <div className="glass-panel p-4 rounded-xl border border-white/10 space-y-3">
+                <h4 className="font-bold text-orange-400 text-[10px] uppercase tracking-[0.2em]">Work zero (Z0 = stock top)</h4>
+                <p className="text-[10px] text-gray-500">Mill programs from the Mill tab expect Z0 on the <b>top of the raw stock</b>. Jog the tool until it just touches the stock (paper method), then set Z0 — or use a touch plate.</p>
+                <div className="grid grid-cols-2 gap-2">
+                    <button disabled={!onCommand} onClick={() => send(['G10 L20 P1 Z0'], 'Set Z0 at the current tool position (tool tip touching the stock top)?')}
+                        className={`${btn} bg-emerald-700/40 hover:bg-emerald-600/50 border-emerald-500/30`}>Set Z0 here</button>
+                    <button disabled={!onCommand} onClick={() => send(['G91', 'G0 Z10', 'G90'])}
+                        className={`${btn} bg-white/5 hover:bg-white/10 border-white/10`}>Lift Z +10 mm</button>
+                </div>
+
+                <div className="bg-black/30 rounded-lg p-3 border border-white/5 space-y-2">
+                    <div className="flex items-center gap-1 text-[10px] uppercase font-bold text-gray-400">Touch plate probe <HelpIcon text="Place the plate on the stock, clip the probe wire to the bit. The tool moves down at the probe feed until it touches, then sets Z = plate thickness and lifts 5 mm." /></div>
+                    <div className="grid grid-cols-2 gap-2">
+                        <label className="text-[10px] text-gray-500">Plate thickness (mm)
+                            <input type="number" step={0.01} value={plate} onChange={e => setPlate(parseFloat(e.target.value) || 0)} className="w-full mt-0.5 bg-black/50 border border-white/10 rounded px-2 py-1 text-xs font-mono text-white" />
+                        </label>
+                        <label className="text-[10px] text-gray-500">Probe feed (mm/min)
+                            <input type="number" step={10} value={probeFeed} onChange={e => setProbeFeed(Math.max(10, parseFloat(e.target.value) || 100))} className="w-full mt-0.5 bg-black/50 border border-white/10 rounded px-2 py-1 text-xs font-mono text-white" />
+                        </label>
+                    </div>
+                    <button disabled={!onCommand}
+                        onClick={() => send(['G91', `G38.2 Z-30 F${probeFeed}`, 'G90', `G10 L20 P1 Z${plate.toFixed(3)}`, 'G91', 'G0 Z5', 'G90'],
+                            `Probe down (max 30 mm) at ${probeFeed} mm/min? The touch plate must be under the bit and the clip attached.`)}
+                        className={`${btn} w-full bg-cyan-700/40 hover:bg-cyan-600/50 border-cyan-500/30`}>Probe Z with touch plate</button>
+                </div>
+
+                <button disabled={!onCommand} onClick={() => send(['G91', 'G0 Z10', 'G0 Z-10', 'G90'], 'Z direction test: the head should go UP 10 mm, then back down. If it goes DOWN first, your Z axis is inverted ($3 direction mask). Make sure there are 10 mm free below the tool. Continue?')}
+                    className="w-full border border-gray-600 text-gray-400 text-[10px] py-1 rounded hover:text-white hover:bg-white/5 transition-colors disabled:opacity-40">
+                    Test Z direction (up 10 mm, then back)
+                </button>
             </div>
 
-            {subTab === 'setup' && (
-                <div className="space-y-4">
-                    <div className="bg-white/5 p-4 rounded border border-white/5">
-                        <h4 className="font-bold text-orange-400 mb-2 text-xs uppercase tracking-wider">Z-Probe & Setup</h4>
-                        <div className="flex gap-2 text-white">
-                            <button className="flex-1 bg-cyan-700/50 hover:bg-cyan-600 py-2 rounded text-xs border border-cyan-500/30">Probe Z-Zero</button>
-                            <button className="flex-1 bg-gray-700/50 hover:bg-gray-600 py-2 rounded text-xs border border-gray-600/30">Check Height</button>
-                        </div>
-                        <button onClick={testZ} className="w-full mt-2 border border-gray-600 text-gray-400 text-[10px] py-1 hover:text-white hover:bg-white/5 transition-colors">
-                            Test Z Direction (Move Up 10mm)
-                        </button>
-                    </div>
-
-                    <ToolManager />
-
-                    <div className="bg-white/5 p-4 rounded border border-white/5">
-                        <h4 className="font-bold text-orange-400 mb-2 text-xs uppercase tracking-wider">Tool Management Hints</h4>
-                        <div className="text-[10px] text-gray-500 mt-1 italic">
-                            1. Select Tool in Manager above.<br />
-                            2. Manually change physical bit.<br />
-                            3. Place sensor on stock and Probe Z-Zero.
-                        </div>
-                    </div>
+            <div className="glass-panel p-4 rounded-xl border border-white/10 space-y-3">
+                <h4 className="font-bold text-orange-400 text-[10px] uppercase tracking-[0.2em]">Spindle</h4>
+                <div className="flex items-start gap-2 text-[10px] text-amber-200 bg-amber-900/20 border border-amber-600/30 rounded p-2">
+                    <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+                    <span>GRBL must be in <b>spindle mode ($32=0)</b> for milling. In laser mode ($32=1) GRBL does not wait for the spindle and moves on G0 with the spindle off. Switch back to $32=1 for laser work.</span>
                 </div>
-            )}
-
-            {subTab === '2.5d' && (
-                <div className="space-y-4 bg-white/5 p-4 rounded text-white border border-white/5">
-                    {/* Auto Center Toggle */}
-                    <div className="flex items-center gap-2 mb-2">
-                        <input type="checkbox" checked={autoCenter} onChange={e => setAutoCenter(e.target.checked)} />
-                        <label className="text-sm">Auto-Center on Bed</label>
-                    </div>
-
-                    <div>
-                        <label className="text-xs text-gray-400 block mb-2">Operation</label>
-                        <div className="text-center py-10 text-gray-500 italic border border-dashed border-gray-700 rounded">
-                            2.5D CAM Module (DXF/SVG)<br />Coming Soon
-                        </div>
-                    </div>
+                <div className="grid grid-cols-2 gap-2">
+                    <button disabled={!onCommand} onClick={() => send(['$32=0'], 'Switch GRBL to spindle mode ($32=0)?')} className={`${btn} bg-white/5 hover:bg-white/10 border-white/10`}>$32=0 · spindle mode</button>
+                    <button disabled={!onCommand} onClick={() => send(['$32=1'], 'Switch GRBL to laser mode ($32=1)?')} className={`${btn} bg-white/5 hover:bg-white/10 border-white/10`}>$32=1 · laser mode</button>
                 </div>
-            )}
-
-            {subTab === '3d' && (
-                <div className="text-center py-10 text-gray-500 italic bg-white/5 rounded border border-white/5">
-                    3D CAM Module (STL/STEP)<br />Coming Soon
+                <div className="flex items-center gap-2">
+                    <input type="number" step={500} value={testRpm} onChange={e => setTestRpm(Math.max(0, parseFloat(e.target.value) || 0))} className="w-24 bg-black/50 border border-white/10 rounded px-2 py-1 text-xs font-mono text-white" />
+                    <span className="text-[10px] text-gray-500">rpm</span>
+                    <button disabled={!onCommand} onClick={() => send([`M3 S${Math.round(testRpm)}`], 'Start the spindle? Keep hands clear.')} className={`${btn} flex-1 bg-orange-700/40 hover:bg-orange-600/50 border-orange-500/30`}>Spindle on</button>
+                    <button disabled={!onCommand} onClick={() => send(['M5'])} className={`${btn} flex-1 bg-red-700/40 hover:bg-red-600/50 border-red-500/30`}>Stop (M5)</button>
                 </div>
-            )}
+            </div>
 
-            {gcode && (
-                <div className="bg-black/40 p-4 rounded border border-white/10 mt-auto">
-                    <h4 className="text-sm text-gray-300 mb-2">G-Code Preview</h4>
-                    <GcodePreview gcode={gcode} />
-                </div>
-            )}
+            <ToolManager />
         </div>
     );
 };

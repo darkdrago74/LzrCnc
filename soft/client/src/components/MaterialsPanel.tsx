@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { apiUrl } from '../api';
 import { Trash2, Plus, Save } from 'lucide-react';
 
 interface Material {
@@ -29,7 +30,7 @@ const MaterialsPanel: React.FC<MaterialsPanelProps> = ({ onSelect }) => {
 
     const fetchMaterials = async () => {
         try {
-            const res = await fetch('http://localhost:3000/materials');
+            const res = await fetch(apiUrl('/materials'));
             const data = await res.json();
             setMaterials(data);
         } catch {
@@ -44,7 +45,7 @@ const MaterialsPanel: React.FC<MaterialsPanelProps> = ({ onSelect }) => {
 
     const handleSave = async () => {
         try {
-            await fetch('http://localhost:3000/materials', {
+            await fetch(apiUrl('/materials'), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(editMat)
@@ -59,7 +60,7 @@ const MaterialsPanel: React.FC<MaterialsPanelProps> = ({ onSelect }) => {
     const handleDelete = async (id: string) => {
         if (!confirm('Delete material?')) return;
         try {
-            await fetch(`http://localhost:3000/materials/${id}`, { method: 'DELETE' });
+            await fetch(apiUrl(`/materials/${id}`), { method: 'DELETE' });
             void fetchMaterials();
         } catch {
             alert('Failed to delete');

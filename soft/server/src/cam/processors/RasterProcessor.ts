@@ -14,8 +14,13 @@ export class RasterProcessor extends CamProcessor {
         // Merge global options with operation settings
         const options = { ...job.options, ...operation.settings } as RasterOptions;
 
-        const { width, height, tool, powerMin, powerMax, invert, feedrate } = options;
-        const toolDiameter = tool.type === 'laser' ? tool.spotSize : 0.1; // Default
+        const { width, height, tool, invert } = options;
+        const legacy = options as any;
+        const toolDiameter = tool?.type === 'laser' ? tool.spotSize : (legacy.lineInterval || 0.1);
+        const maxS = tool?.powerMax ?? 1000;
+        const powerMin = options.powerMin ?? 0;
+        const powerMax = options.powerMax ?? Math.round(((legacy.power ?? 100) / 100) * maxS);
+        const feedrate = options.feedrate ?? legacy.speed ?? 1000;
 
         // Calculate resolution
         const pixelWidth = Math.ceil(width / toolDiameter);
@@ -37,8 +42,11 @@ export class RasterProcessor extends CamProcessor {
 
         // Initial Z Moves
         if (options.safeZ !== undefined) lines.push(`G0 Z${options.safeZ.toFixed(3)}`);
-        lines.push('G0 X0 Y0'); // Go to Origin first
         if (options.workingZ !== undefined) lines.push(`G0 Z${options.workingZ.toFixed(3)}`);
+        // Placement of the image's bottom-left corner in machine coordinates
+        const originX = Number((options as any).x) || 0;
+        const originY = Number((options as any).y) || 0;
+        lines.push('M4 S0'); // Dynamic laser mode; power set per G1 segment
 
         const stepX = width / info.width;
         const stepY = height / info.height;
@@ -55,7 +63,8 @@ export class RasterProcessor extends CamProcessor {
             const endX = isEven ? info.width : -1;
             const step = isEven ? 1 : -1;
 
-            const yPos = (y * stepY).toFixed(3);
+            // Image row 0 is the top of the image; machine Y points up
+            const yPos = (originY + height - (y + 0.5) * stepY).toFixed(3);
 
             // Find the first and last black pixel on this line to optimize travel
             // If line is empty, we can skip it or just do a generic pass?
@@ -89,8 +98,8 @@ export class RasterProcessor extends CamProcessor {
             const lineEndPixel = isEven ? maxX : minX;
 
             // Calculate Physical coordinates
-            const xPhysicalStart = (lineStartPixel * stepX);
-            const xPhysicalEnd = (lineEndPixel * stepX);
+            const xPhysicalStart = originX + (isEven ? lineStartPixel : lineStartPixel + 1) * stepX;
+            const xPhysicalEnd = originX + (isEven ? lineEndPixel + 1 : lineEndPixel) * stepX;
 
             // 1. Move to Start (with Overscan)
             // If coming from previous line, we are at previous End. 
@@ -132,7 +141,7 @@ export class RasterProcessor extends CamProcessor {
                 if (gapDist > WHITE_SKIP_THRESHOLD) {
                     // We hit a big white gap. 
                     // 1. Finish current pixel move
-                    const targetX = ((currentXPixel + step) * stepX).toFixed(3);
+                    const targetX = (originX + (isEven ? currentXPixel + 1 : currentXPixel) * stepX).toFixed(3);
                     if (intensity < 255) {
                         lines.push(`G1 X${targetX} S${fixedPower}`);
                     } else {
@@ -144,13 +153,13 @@ export class RasterProcessor extends CamProcessor {
                     if (intensity < 255) lines.push('S0');
 
                     const newXPixel = peek;
-                    const newXPos = (newXPixel * stepX).toFixed(3);
+                    const newXPos = (originX + (isEven ? newXPixel : newXPixel + 1) * stepX).toFixed(3);
                     lines.push(`G0 X${newXPos}`);
 
                     currentXPixel = newXPixel;
                 } else {
                     // Standard Move
-                    const targetX = ((currentXPixel + step) * stepX).toFixed(3);
+                    const targetX = (originX + (isEven ? currentXPixel + 1 : currentXPixel) * stepX).toFixed(3);
                     if (intensity === 255) {
                         lines.push(`G1 X${targetX} S0`);
                     } else {
@@ -167,7 +176,6 @@ export class RasterProcessor extends CamProcessor {
 
         lines.push('M5');
         if (options.safeZ !== undefined) lines.push(`G0 Z${options.safeZ.toFixed(3)}`);
-        lines.push('G0 X0 Y0');
 
         return {
             gcode: lines.join('\n'),

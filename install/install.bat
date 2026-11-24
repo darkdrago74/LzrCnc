@@ -1,101 +1,76 @@
 @echo off
-setlocal EnableDelayedExpansion
+setlocal EnableExtensions
+rem ==========================================================
+rem  LzrCnc installer (Windows 10/11)
+rem  Needs Node.js 22 LTS (or 20.19+) from https://nodejs.org/
+rem  Installs the npm packages and builds the web UI.
+rem  No administrator rights are needed.
+rem ==========================================================
+
+set "ROOT=%~dp0.."
+set "SOFT=%ROOT%\soft"
 
 echo ==========================================
-echo LzrCnc Windows Installer
+echo   LzrCnc Windows installer
 echo ==========================================
-echo.
-echo NOTE: Ensure you are running this as Administrator if you encounter permission errors.
-echo.
 
-:: Check for Node.js
-node -v >nul 2>&1
-if %errorlevel% neq 0 (
-    echo [ERROR] Node.js is not installed or not in PATH.
-    echo Please install Node.js v20+ from https://nodejs.org/
-    pause
-    exit /b 1
-) else (
-    echo [CHECK] Node.js found.
-)
+where node >nul 2>&1
+if errorlevel 1 goto :nonode
+for /f "tokens=1,2 delims=v." %%a in ('node -v') do (set "NMAJ=%%a" & set "NMIN=%%b")
+set /a NVER=NMAJ*1000+NMIN
+if %NVER% LSS 20019 goto :oldnode
+if %NMAJ% EQU 21 goto :oldnode
+if %NMAJ% EQU 22 if %NMIN% LSS 12 goto :oldnode
+echo [CHECK] Node.js v%NMAJ%.%NMIN% found.
 
-:: Install Root Dependencies
-echo.
-echo [1/3] Installing Root Dependencies...
-if exist package.json (
-    call npm install
-    if %errorlevel% neq 0 (
-        echo [ERROR] Failed to install root dependencies.
-        pause
-        exit /b 1
-    )
-) else (
-    echo [ERROR] package.json not found in root.
-    pause
-    exit /b 1
-)
-
-:: Install Server Dependencies
-echo.
-echo [2/3] Installing Server Dependencies...
-if exist server (
-    cd server
-    call npm install
-    if %errorlevel% neq 0 (
-        echo [ERROR] Failed to install server dependencies.
-        cd ..
-        pause
-        exit /b 1
-    )
-    echo Building Server...
-    call npm run build
-    if %errorlevel% neq 0 (
-        echo [WARNING] Server build failed. Checking for Windows-specific dependencies...
-        echo Attempting to install 'sharp' for Windows x64...
-        call npm install --os=win32 --cpu=x64 sharp
-        echo Re-attempting build...
-        call npm run build
-        if !errorlevel! neq 0 (
-            echo [ERROR] Server build still failed. Please check logs.
-            cd ..
-            pause
-            exit /b 1
-        )
-    )
-    cd ..
-) else (
-    echo [ERROR] server directory not found.
-    pause
-    exit /b 1
-)
-
-:: Install Client Dependencies
-echo.
-echo [3/3] Installing Client Dependencies...
-if exist client (
-    cd client
-    call npm install
-    if %errorlevel% neq 0 (
-        echo [ERROR] Failed to install client dependencies.
-        cd ..
-        pause
-        exit /b 1
-    )
-    echo Building Client...
-    call npm run build
-    if %errorlevel% neq 0 (
-        echo [WARNING] Client build failed. Continuing...
-    )
-    cd ..
-) else (
-    echo [ERROR] client directory not found.
-    pause
-    exit /b 1
+if not exist "%SOFT%\package.json" (
+    echo [ERROR] soft\package.json not found - is the project folder complete?
+    goto :fail
 )
 
 echo.
+echo [1/2] Installing npm packages - this takes a few minutes...
+pushd "%SOFT%"
+call npm ci --no-audit --no-fund
+if errorlevel 1 (
+    echo [WARNING] npm ci failed, retrying with npm install...
+    call npm install --no-audit --no-fund
+    if errorlevel 1 (
+        popd
+        echo [ERROR] npm install failed.
+        goto :fail
+    )
+)
+
+echo.
+echo [2/2] Building the web UI...
+call npm run build:fast --workspace=client
+if errorlevel 1 (
+    popd
+    echo [ERROR] Web UI build failed.
+    goto :fail
+)
+popd
+
+echo.
 echo ==========================================
-echo Installation Complete!
-echo You can now run 'start.bat' to launch LzrCnc.
+echo   Installation complete!
+echo   Start LzrCnc:  start.bat        (real machine)
+echo                  start.bat sim    (simulator)
+echo   Then open http://localhost:3001
 echo ==========================================
-pause
+if "%LZRCNC_NO_PAUSE%"=="" pause
+exit /b 0
+
+:nonode
+echo [ERROR] Node.js is not installed or not in PATH.
+echo Install Node.js 22 LTS from https://nodejs.org/ then run this again.
+goto :fail
+
+:oldnode
+echo [ERROR] Node.js v%NMAJ%.%NMIN% is too old. Install Node.js 22 LTS or newer from https://nodejs.org/
+goto :fail
+
+:fail
+if "%LZRCNC_NO_PAUSE%"=="" pause
+exit /b 1

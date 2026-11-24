@@ -1,14 +1,15 @@
 {
   "name": "LzrCnc",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "install:all": "./install.sh",
+    "test": "npm run test --workspaces -- --run",
+    "install:all": "npm install && npm run build:fast --workspace=client",
     "dev": "concurrently \"npm run start --workspace=server\" \"npm run dev --workspace=client\"",
     "start": "npm run start --workspace=server",
-    "build": "npm run build --workspaces"
+    "build": "npm run build --workspaces",
+    "sim": "concurrently \"npm run sim --workspace=server\" \"npm run dev --workspace=client\""
   },
   "keywords": [],
   "author": "",

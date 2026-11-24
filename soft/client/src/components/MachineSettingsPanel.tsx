@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { apiUrl } from '../api';
 import { Save, Upload, Download, RefreshCw, LayoutTemplate, Box, ArrowLeftRight, Eye, Unlock, Settings as SettingsIcon } from 'lucide-react';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls, PerspectiveCamera, Html } from '@react-three/drei';
@@ -19,7 +20,8 @@ function AxisVisualizer({ settings, onUpdateOrigin, updateAxis }: { settings: Ma
 
     return (
         <Canvas>
-            <PerspectiveCamera makeDefault position={[0, 400, 400]} fov={45} />
+            {/* Z-up: XY is the bed plane, camera looks from the front (-Y) and above (+Z) */}
+            <PerspectiveCamera makeDefault up={[0, 0, 1]} position={[0, -Math.max(w, h) * 1.1, Math.max(w, h) * 1.1]} fov={45} />
             <OrbitControls enableZoom={true} enablePan={true} maxPolarAngle={Math.PI / 2} target={[0, 0, 0]} />
             <ambientLight intensity={0.5} />
             <pointLight position={[100, 100, 100]} />
@@ -85,13 +87,13 @@ function SettingsScene({ w, h, origin, settings, onUpdateOrigin, updateAxis }: {
     // const zHome = settings.axes.z.homingPos || 'max'; // Z Visualizer Removed per user request
 
     return (
-        <group rotation={[-Math.PI / 2, 0, 0]}> {/* Flat top-down view (Plan XY) */}
+        <group>
             {/* Bed Plate */}
-            <mesh receiveShadow>
+            <mesh receiveShadow position={[0, 0, -1]}>
                 <boxGeometry args={[w, h, 2]} />
                 <meshStandardMaterial color="#e5e7eb" roughness={0.5} />
             </mesh>
-            <gridHelper args={[Math.max(w, h), 10]} rotation={[Math.PI / 2, 0, 0]} position={[0, 0, 1.1]} />
+            <gridHelper args={[Math.max(w, h), 10]} rotation={[Math.PI / 2, 0, 0]} position={[0, 0, 0.1]} />
 
             {/* Clickable Origin Selectors */}
             <OriginSelector pos={BL} active={origin === 'bottom-left'} onClick={() => onUpdateOrigin('bottom-left')} label="BL" />
@@ -277,7 +279,6 @@ interface MachineSettingsPanelProps {
     onSettingsChange?: (settings: MachineSettings) => void;
 }
 
-const API_URL = import.meta.env.DEV ? 'http://localhost:3000' : '';
 
 export default function MachineSettingsPanel({ status, laserBeamEnabled, setLaserBeamEnabled, onSettingsChange }: MachineSettingsPanelProps) {
     const [settings, setSettings] = useState<MachineSettings | null>(null);
@@ -310,7 +311,7 @@ export default function MachineSettingsPanel({ status, laserBeamEnabled, setLase
     const fetchSettings = async () => {
         setLoading(true);
         try {
-            const res = await fetch(`${API_URL}/api/settings/machine`);
+            const res = await fetch(apiUrl(`/api/settings/machine`));
             const data = await res.json();
             setSettings(data);
         } catch (error) {
@@ -324,7 +325,7 @@ export default function MachineSettingsPanel({ status, laserBeamEnabled, setLase
         if (!settings) return;
         setSaving(true);
         try {
-            await fetch(`${API_URL}/api/settings/machine`, {
+            await fetch(apiUrl(`/api/settings/machine`), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(settings)
@@ -361,7 +362,7 @@ export default function MachineSettingsPanel({ status, laserBeamEnabled, setLase
     const checkUpdates = async () => {
         setCheckingUpdate(true);
         try {
-            const res = await fetch(`${API_URL}/api/system/update/check`);
+            const res = await fetch(apiUrl(`/api/system/update/check`));
             const data = await res.json();
             setUpdateInfo(data);
         } catch (e) {
@@ -374,7 +375,7 @@ export default function MachineSettingsPanel({ status, laserBeamEnabled, setLase
     const handleUpdate = async () => {
         if (!confirm("This will update the software and restart the server. Continue?")) return;
         try {
-            await fetch(`${API_URL}/api/system/update/apply`, { method: 'POST' });
+            await fetch(apiUrl(`/api/system/update/apply`), { method: 'POST' });
             alert("Update started. Server is restarting... Page will reload in 10s.");
             setTimeout(() => window.location.reload(), 10000);
         } catch (e) {
@@ -384,7 +385,7 @@ export default function MachineSettingsPanel({ status, laserBeamEnabled, setLase
 
     const sendGcode = async (cmd: string) => {
         try {
-            await fetch(`${API_URL}/command`, {
+            await fetch(apiUrl(`/command`), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ gcode: cmd })
@@ -834,7 +835,7 @@ export default function MachineSettingsPanel({ status, laserBeamEnabled, setLase
                     </div>
                     <div className="flex justify-between">
                         <span>Client Version:</span>
-                        <span className="font-mono">v1.1.0 (Settings Upd)</span>
+                        <span className="font-mono">v{__APP_VERSION__}</span>
                     </div>
                     <div className="flex justify-between">
                         <span>Mode:</span>

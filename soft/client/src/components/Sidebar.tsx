@@ -13,7 +13,7 @@ export function Sidebar({ activeTab, onTabChange, connectionState }: SidebarProp
         { id: 'connection', icon: Zap, label: 'Connection' },
         { id: 'jog', icon: Move, label: 'Control', disabled: !isConnected },
         { id: 'cam', icon: Grid, label: 'CAM' },
-        { id: 'gcode', icon: Terminal, label: 'G-Code', disabled: !isConnected },
+        { id: 'gcode', icon: Terminal, label: 'G-Code' },
         { id: 'macros', icon: FolderOpen, label: 'Macros', disabled: !isConnected },
         { id: 'settings', icon: Settings, label: 'Settings' },
     ];

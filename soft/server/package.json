@@ -6,7 +6,8 @@
   "scripts": {
     "test": "vitest",
     "build": "tsc",
-    "start": "tsx src/index.ts"
+    "start": "tsx src/index.ts",
+    "sim": "cross-env MOCK_HARDWARE=true tsx src/index.ts"
   },
   "keywords": [],
   "author": "",
@@ -36,6 +37,7 @@
     "xml2js": "^0.6.2"
   },
   "devDependencies": {
+    "cross-env": "^7.0.3",
     "vitest": "^4.0.17"
   }
 }

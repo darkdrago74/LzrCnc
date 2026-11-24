@@ -3,6 +3,8 @@ import { SettingsService, MachineSettings } from '../services/SettingsService.js
 import { exec } from 'child_process';
 import util from 'util';
 import { resolvePath } from '../utils/pathUtils.js';
+import path from 'path';
+import fs from 'fs';
 
 const execAsync = util.promisify(exec);
 
@@ -61,11 +63,21 @@ export default async function settingsRoutes(server: FastifyInstance, options: {
 
     server.post('/api/system/update/apply', async (request, reply) => {
         try {
-            const scriptPath = resolvePath('update.sh');
+            // update.sh lives in <repo>/install/; server usually runs from <repo>/soft/server
+            const candidates = [
+                path.join(process.cwd(), '..', '..', 'install', 'update.sh'),
+                path.join(process.cwd(), '..', 'install', 'update.sh'),
+                path.join(process.cwd(), 'install', 'update.sh'),
+                resolvePath('update.sh'),
+            ];
+            const scriptPath = candidates.find(p => fs.existsSync(p));
+            if (!scriptPath) {
+                return reply.status(500).send({ error: 'Update failed', details: 'update.sh not found' });
+            }
 
             // Execute update script
             // We await it to ensure it completes before restarting
-            await execAsync(`"${scriptPath}"`);
+            await execAsync(`bash "${scriptPath}"`);
 
             // Trigger restart
             // In systemd environment, exiting with 0 triggers restart if Restart=always

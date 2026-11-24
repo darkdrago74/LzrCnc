@@ -5,6 +5,10 @@ export interface CamOperation {
     type: OperationType;
     enabled: boolean;
     order: number;
+    /** User label of the profile, e.g. "Cut 3 mm plywood" */
+    name?: string;
+    /** Tag colour shown on the objects using this profile */
+    color?: string;
     settings: Record<string, any>;
 }
 

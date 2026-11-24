@@ -5,6 +5,7 @@ import { GrblController } from './machine/GrblController.js';
 import { KlipperController } from './machine/KlipperController.js';
 import { MachineInterface } from './machine/MachineInterface.js';
 import { MockController } from './machine/MockController.js';
+import { JobRunner, JobConflictError, cleanGcodeLines } from './machine/JobRunner.js';
 import camRoutes from './routes/cam.js';
 import materialRoutes from './routes/material.js'; // Assuming new material routes
 import settingsRoutes from './routes/settings.js'; // Import Settings Routes
@@ -19,7 +20,8 @@ import fastifyStatic from '@fastify/static';
 
 // ... existing imports ...
 
-const server: FastifyInstance = Fastify({ logger: true });
+// Raster jobs carry image data URLs / large G-code bodies
+const server: FastifyInstance = Fastify({ logger: true, bodyLimit: 100 * 1024 * 1024 });
 
 server.register(cors, {
     origin: '*'
@@ -59,6 +61,8 @@ server.setNotFoundHandler((req, reply) => {
 
 
 let machine: MachineInterface | null = null;
+const jobRunner = new JobRunner();
+const REALTIME_COMMANDS = new Set(['!', '~', '?', '\x18']);
 const isSim = process.env.MOCK_HARDWARE === 'true' || process.argv.includes('--sim');
 
 if (isSim) {
@@ -114,64 +118,126 @@ server.get('/api/ports', async (request, reply) => {
     }
 });
 
-server.post('/connect', async (request: any, reply) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { type, port, baud, host } = request.body;
-
-    if (machine) {
-        try {
-            await machine.disconnect();
-        } catch (e) { }
+async function disconnectMachine() {
+    const m = machine;
+    machine = null;
+    jobRunner.abandon('Machine disconnected');
+    if (m) {
+        try { await m.disconnect(); } catch (e) { server.log.warn(e); }
     }
+}
 
-    if (type === 'grbl') {
-        machine = new GrblController();
-        await machine.connect(port, baud);
-    } else if (type === 'klipper') {
-        machine = new KlipperController();
-        await machine.connect(host);
-    } else if (type === 'mock') {
-        machine = new MockController();
-        await machine.connect('mock-device');
-    } else {
+server.post('/connect', async (request: any, reply) => {
+    const { type, port, baud, host } = request.body ?? {};
+    if (!['grbl', 'klipper', 'mock'].includes(type)) {
         return reply.code(400).send({ error: 'Invalid machine type' });
     }
+    if (jobRunner.isActive()) {
+        return reply.code(409).send({ error: 'A job is running. Stop it before reconnecting.' });
+    }
 
+    await disconnectMachine();
+
+    let next: MachineInterface;
+    try {
+        if (type === 'grbl') {
+            next = new GrblController();
+            await next.connect(port, baud);
+        } else if (type === 'klipper') {
+            next = new KlipperController();
+            await next.connect(host);
+        } else {
+            next = new MockController();
+            await next.connect('mock-device');
+        }
+    } catch (e: any) {
+        server.log.error(e);
+        return reply.code(500).send({ error: `Connection failed: ${e?.message ?? e}` });
+    }
+    next.on('error', (err: Error) => server.log.error(err));
+    machine = next;
     return { status: 'connected', type };
 });
 
+server.post('/disconnect', async () => {
+    await disconnectMachine();
+    return { status: 'disconnected' };
+});
+
 server.post('/command', async (request, reply) => {
-    const { gcode } = request.body as any;
-    if (machine) {
-        await machine.command(gcode);
+    const { gcode } = (request.body ?? {}) as any;
+    if (typeof gcode !== 'string' || gcode.length === 0) {
+        return reply.code(400).send({ error: 'gcode must be a non-empty string' });
     }
+    if (!machine) return reply.code(400).send({ error: 'Not connected' });
+    const realtime = REALTIME_COMMANDS.has(gcode) || REALTIME_COMMANDS.has(gcode.trim());
+    if (jobRunner.isActive() && !realtime) {
+        return reply.code(409).send({ error: 'A job is running' });
+    }
+    await machine.command(realtime ? (REALTIME_COMMANDS.has(gcode) ? gcode : gcode.trim()) : gcode);
     return { status: 'sent' };
 });
 
 server.post('/probe', async (request, reply) => {
-    const options = request.body as any; // Validation skipped for prototype
-    if (machine) {
-        try {
-            await machine.probe(options);
-            return { status: 'ok' };
-        } catch (e: any) {
-            return { status: 'error', message: e.message };
-        }
+    const options = request.body as any;
+    if (!machine) return { status: 'disconnected' };
+    if (jobRunner.isActive()) return reply.code(409).send({ error: 'A job is running' });
+    try {
+        await machine.probe(options);
+        return { status: 'ok' };
+    } catch (e: any) {
+        return { status: 'error', message: e.message };
     }
-    return { status: 'disconnected' };
 });
 
 server.post('/jog', async (request: any, reply) => {
     if (!machine) return reply.code(400).send({ error: 'Not connected' });
+    if (jobRunner.isActive()) return reply.code(409).send({ error: 'A job is running' });
     const { axis, dist, feedrate } = request.body;
     await machine.jog(axis, dist, feedrate);
     return { status: 'ok' };
 });
 
-server.get('/status', async (request, reply) => {
+// ── Job streaming ────────────────────────────────────────────────────────────
+
+server.post('/cam/stream-job', async (request: any, reply) => {
+    const { setupCommands, gcode } = request.body ?? {};
+    if (typeof gcode !== 'string' && !Array.isArray(gcode)) {
+        return reply.code(400).send({ error: 'gcode must be a string or an array of lines' });
+    }
+    if (setupCommands !== undefined && !Array.isArray(setupCommands)) {
+        return reply.code(400).send({ error: 'setupCommands must be an array of strings' });
+    }
+    if (!machine) return reply.code(409).send({ error: 'Machine not connected' });
+    if (jobRunner.isActive()) return reply.code(409).send({ error: 'A job is already running' });
+    const state = machine.getStatus().state;
+    if (state !== 'Idle') return reply.code(409).send({ error: `Machine is not idle (state: ${state})` });
+
+    const lines = [...cleanGcodeLines(setupCommands ?? []), ...cleanGcodeLines(gcode)];
+    if (lines.length === 0) return reply.code(400).send({ error: 'No G-code lines to send' });
+    try {
+        const { total } = jobRunner.start(machine, lines);
+        return { status: 'started', total };
+    } catch (e: any) {
+        if (e instanceof JobConflictError) return reply.code(409).send({ error: e.message });
+        throw e;
+    }
+});
+
+server.post('/job/pause', async () => ({ status: await jobRunner.pause() }));
+server.post('/job/resume', async () => ({ status: await jobRunner.resume() }));
+server.post('/job/stop', async () => ({ status: await jobRunner.stop() }));
+
+let cachedIp = { value: '127.0.0.1', at: 0 };
+function getCachedIp() {
+    if (Date.now() - cachedIp.at > 10000) cachedIp = { value: getNetworkIp(), at: Date.now() };
+    return cachedIp.value;
+}
+
+server.get('/status', async () => {
     const status = machine ? machine.getStatus() : { state: 'Disconnected' };
-    const settings = await settingsService.getSettings();
-    return { ...status, ip: getNetworkIp(), machineSettings: settings };
+    const settings = await settingsService.getSettings(); // cached in memory after first read
+    return { ...status, ip: getCachedIp(), machineSettings: settings, job: jobRunner.getStatus() };
 });
 
 const { AIGcodeOptimizer } = require('./cam/processors/AIGcodeOptimizer');

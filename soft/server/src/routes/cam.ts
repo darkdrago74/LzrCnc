@@ -3,16 +3,17 @@ import { CamService } from '../cam/CamService.js';
 import { DxfConverter } from '../cam/processors/DxfConverter.js';
 import { GCodeModifier } from '../cam/processors/GCodeModifier.js';
 import { PathAnalyzer } from '../cam/PathAnalyzer.js';
-import { MillingGcodeGenerator } from '../cam/MillingGcodeGenerator.js';
+import { generateMillingJob, MillJobValidationError } from '../cam/MillingGcodeGenerator.js';
+import { generateLaserJob, validateLaserJob, LaserJobValidationError } from '../cam/LaserJobGenerator.js';
 
 export default async function camRoutes(server: FastifyInstance) {
     const camService = new CamService();
     const dxfConverter = new DxfConverter();
     const gcodeModifier = new GCodeModifier();
     const pathAnalyzer = new PathAnalyzer();
-    const millingGenerator = new MillingGcodeGenerator();
 
-    server.post('/cam/generate', async (request: any, reply) => {
+    /** Legacy file-based generation (fileContent/filePath + processor options). */
+    async function legacyGenerate(request: any, reply: any) {
         const { fileContent, filePath, fileName, operations, options } = request.body;
         // Support both: uploaded file path OR raw content sent in body
         // If fileContent is base64 string, convert to Buffer
@@ -72,6 +73,25 @@ export default async function camRoutes(server: FastifyInstance) {
         } catch (err: any) {
             server.log.error(err);
             return reply.code(500).send({ error: err.message });
+        }
+    }
+
+    server.post('/cam/generate', async (request: any, reply) => {
+        const body = request.body ?? {};
+        const isLegacy = (body.fileContent || body.filePath)
+            && !(Array.isArray(body.operations) && body.operations.some((o: any) => o && (o.vectors || o.rasters)));
+        if (isLegacy) return legacyGenerate(request, reply);
+
+        try {
+            const job = validateLaserJob(body);
+            const result = await generateLaserJob(job);
+            return { status: 'success', gcode: result.gcode, stats: result.stats };
+        } catch (err: any) {
+            if (err instanceof LaserJobValidationError) {
+                return reply.code(400).send({ status: 'error', error: err.message });
+            }
+            server.log.error(err);
+            return reply.code(500).send({ status: 'error', error: err.message });
         }
     });
 
@@ -151,26 +171,16 @@ export default async function camRoutes(server: FastifyInstance) {
 
     /**
      * POST /cam/generate-milling
-     * Generates 2.5D milling G-code from a set of operations.
-     * Returns: gcode string + toolpathPolygons (offset outlines for visualizer preview).
+     * 2.5D milling (face / pocket / profile) for a stock block. Z0 = stock top.
+     * Body: { stock, safeZ?, rapidRate?, contours[{id,points,closed}], operations[] } — see MillingGcodeGenerator.
+     * Returns: { gcode, toolpaths, warnings, operations, stats }.
      */
     server.post('/cam/generate-milling', async (request: any, reply) => {
         try {
-            const { paths, pathOffsets, operations, stockSurface } = request.body;
-
-            if (!paths || !Array.isArray(paths) || !operations || operations.length === 0) {
-                return reply.code(400).send({ error: 'Missing paths or operations' });
-            }
-
-            const result = millingGenerator.generate({
-                paths,
-                pathOffsets: pathOffsets || {},
-                operations,
-                stockSurface: stockSurface ?? 0,
-            });
-
+            const result = generateMillingJob(request.body);
             return { status: 'success', ...result };
         } catch (err: any) {
+            if (err instanceof MillJobValidationError) return reply.code(400).send({ error: err.message });
             server.log.error(err);
             return reply.code(500).send({ error: err.message });
         }

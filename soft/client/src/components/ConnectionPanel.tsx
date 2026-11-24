@@ -1,16 +1,17 @@
 import React, { useState } from 'react';
+import { apiUrl } from '../api';
 import { Settings, Link, Wifi } from 'lucide-react';
 import type { MachineStatus } from '../types';
 
 interface ConnectionPanelProps {
     status: MachineStatus;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    onConnect: (type: 'grbl' | 'klipper', config: any) => void;
+    onConnect: (type: 'grbl' | 'klipper' | 'mock', config: any) => void;
     onDisconnect: () => void;
 }
 
 export const ConnectionPanel: React.FC<ConnectionPanelProps> = ({ status, onConnect, onDisconnect }) => {
-    const [mode, setMode] = useState<'grbl' | 'klipper'>('grbl');
+    const [mode, setMode] = useState<'grbl' | 'klipper' | 'mock'>('grbl');
     const [port, setPort] = useState('/dev/ttyUSB0');
     const [baud, setBaud] = useState(115200);
     const [host, setHost] = useState('192.168.1.100');
@@ -20,8 +21,7 @@ export const ConnectionPanel: React.FC<ConnectionPanelProps> = ({ status, onConn
     const fetchPorts = async () => {
         setIsLoadingPorts(true);
         try {
-            const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
-            const res = await fetch(`${API_URL}/api/ports`);
+            const res = await fetch(apiUrl(`/api/ports`));
             if (res.ok) {
                 const data = await res.json();
                 if (data.ports && data.ports.length > 0) {
@@ -50,6 +50,8 @@ export const ConnectionPanel: React.FC<ConnectionPanelProps> = ({ status, onConn
     const handleConnect = () => {
         if (mode === 'grbl') {
             onConnect('grbl', { port, baud });
+        } else if (mode === 'mock') {
+            onConnect('mock', {});
         } else {
             onConnect('klipper', { host });
         }
@@ -76,6 +78,14 @@ export const ConnectionPanel: React.FC<ConnectionPanelProps> = ({ status, onConn
                     disabled={isConnected}
                 >
                     Klipper (Net)
+                </button>
+                <button
+                    className={`flex-1 py-1 text-sm rounded ${mode === 'mock' ? 'bg-[var(--accent-color)] text-white' : 'text-[var(--text-secondary)] hover:text-white'}`}
+                    onClick={() => setMode('mock')}
+                    disabled={isConnected}
+                    title="Virtual machine: try jogging, framing and running jobs without hardware"
+                >
+                    Simulator
                 </button>
             </div>
 
@@ -140,6 +150,11 @@ export const ConnectionPanel: React.FC<ConnectionPanelProps> = ({ status, onConn
                             </select>
                         </div>
                     </>
+                ) : mode === 'mock' ? (
+                    <p className="text-xs text-[var(--text-secondary)] leading-relaxed">
+                        Connects to a simulated GRBL machine running on the server. Moves, frames and jobs are
+                        animated in the visualizer so you can verify a job before burning or cutting anything.
+                    </p>
                 ) : (
                     <div>
                         <label className="label">IP Address / Hostname</label>

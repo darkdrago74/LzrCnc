@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { apiUrl } from '../../api';
 import { Pen, Trash, Plus, Calculator } from 'lucide-react';
 
 export interface CncTool {
@@ -33,7 +34,7 @@ export const ToolManager: React.FC = () => {
 
     const fetchTools = async () => {
         try {
-            const res = await fetch('http://localhost:3000/api/tools');
+            const res = await fetch(apiUrl('/api/tools'));
             const data = await res.json();
             setTools(data);
         } catch (err) {
@@ -47,8 +48,8 @@ export const ToolManager: React.FC = () => {
         try {
             const method = editing.id ? 'PUT' : 'POST';
             const url = editing.id
-                ? `http://localhost:3000/api/tools/${editing.id}`
-                : 'http://localhost:3000/api/tools';
+                ? apiUrl(`/api/tools/${editing.id}`)
+                : apiUrl('/api/tools');
 
             const res = await fetch(url, {
                 method,
@@ -68,7 +69,7 @@ export const ToolManager: React.FC = () => {
     const handleDelete = async (id: string) => {
         if (!confirm('Delete this tool?')) return;
         try {
-            await fetch(`http://localhost:3000/api/tools/${id}`, { method: 'DELETE' });
+            await fetch(apiUrl(`/api/tools/${id}`), { method: 'DELETE' });
             fetchTools();
         } catch (err) {
             console.error(err);
@@ -166,6 +167,15 @@ export const ToolManager: React.FC = () => {
                                     className="w-full bg-black/50 border border-gray-600 rounded px-2 py-1"
                                     value={editing.flutes}
                                     onChange={e => setEditing({ ...editing, flutes: parseFloat(e.target.value) })}
+                                />
+                            </div>
+                            <div>
+                                <label className="text-xs text-gray-400 block">Max RPM (optional)</label>
+                                <input
+                                    type="number"
+                                    className="w-full bg-black/50 border border-gray-600 rounded px-2 py-1"
+                                    value={editing.maxRPM ?? ''}
+                                    onChange={e => setEditing({ ...editing, maxRPM: e.target.value === '' ? undefined : parseFloat(e.target.value) })}
                                 />
                             </div>
                         </div>

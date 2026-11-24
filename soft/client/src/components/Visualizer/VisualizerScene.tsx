@@ -1,18 +1,23 @@
-import React, { useState, useRef, Suspense, useEffect, useCallback } from 'react';
-import { Canvas } from '@react-three/fiber';
-import { OrbitControls, TransformControls } from '@react-three/drei';
+import React, { useState, useRef, Suspense, useEffect, useMemo } from 'react';
+import { Canvas, useFrame, useThree } from '@react-three/fiber';
+import { OrbitControls, TransformControls, GizmoHelper, GizmoViewport } from '@react-three/drei';
 import { EffectComposer, Bloom } from '@react-three/postprocessing';
 import * as THREE from 'three';
 import MachineBed from './MachineBed';
 import MachineHead from './MachineHead';
 import GCodeViewer from './GCodeViewer';
 import { BackgroundLaser } from './BackgroundLaser';
-
-import { PreviewLayer } from './PreviewLayer';
 import ObjectRenderer from './ObjectRenderer';
-import PathRenderer from '../cam/PathRenderer';
-import ToolpathOverlay from '../cam/ToolpathOverlay';
-import type { SceneObject, DetectedPath, ToolpathPolygon } from '../../types';
+import MillScene, { type MillSceneProps } from './MillScene';
+import type { SceneObject, MachineSettings } from '../../types';
+import { getBedExtents } from '../../utils/machineGeometry';
+import type { BedExtents } from '../../utils/machineGeometry';
+import { Box, Square, Maximize, RectangleHorizontal, Sparkles } from 'lucide-react';
+
+// The whole scene works in machine coordinates: XY is the bed plane and +Z points up/out of it.
+THREE.Object3D.DEFAULT_UP.set(0, 0, 1);
+
+type ViewMode = '3d' | 'top' | 'front';
 
 interface VisualizerSceneProps {
     machinePos: { x: number, y: number, z: number };
@@ -22,50 +27,97 @@ interface VisualizerSceneProps {
         z: { min: number, max: number };
     };
     gcode?: string[];
+    /** Raw G-code line index reached by the running job (cuts before it are drawn as done) */
+    progressLine?: number;
+    spindle?: number;
     laserBeamEnabled?: boolean;
-    machineSettings?: any;
-    // New Props for Cam Integration
-    previewContent?: string | null;
-    previewType?: 'vector' | 'raster';
-    previewSize?: { width: number, height: number };
+    machineSettings?: Partial<MachineSettings> | null;
     objects?: SceneObject[];
     onSelectObject?: (id: string) => void;
     onObjectUpdate?: (id: string, updates: Partial<SceneObject>) => void;
-    // Milling path overlay
-    detectedPaths?: DetectedPath[];
-    selectedPathIds?: string[];
-    onPathSelect?: (id: string, multi: boolean) => void;
-    /** Called when user finishes dragging a path — provides the new XY offset */
-    onPathMove?: (id: string, position: [number, number, number]) => void;
-    /** Computed toolpath polygons (offset outlines) to render as preview */
-    toolpathPolygons?: ToolpathPolygon[];
+    /** Milling workspace: shown while the Mill tab is open or a milling program is loaded. */
+    mill?: MillSceneProps & { active: boolean };
+    /** The loaded G-code is a milling program. */
+    gcodeIsMill?: boolean;
+    /** G-code Z of the stock top in the loaded milling program (0: Z0 on top, thickness: Z0 on bottom). */
+    gcodeTopZ?: number;
 }
 
-const VisualizerScene: React.FC<VisualizerSceneProps> = ({
-    machinePos, limits, gcode = [], laserBeamEnabled = true, machineSettings,
-    previewContent, previewType, previewSize, objects, onSelectObject, onObjectUpdate,
-    detectedPaths, selectedPathIds = [], onPathSelect, onPathMove, toolpathPolygons
-}) => {
-    const [is2D, setIs2D] = useState(false);
-    const containerRef = useRef<HTMLDivElement>(null);
-    const objectRefs = useRef<Record<string, THREE.Group | null>>({});
-    const pathGroupRefs = useRef<Record<string, THREE.Group | null>>({});
-    const orbitRef = useRef<any>(null);
+/** Moves the camera to a preset (top / front / 3D) framing the whole bed, with a short ease. */
+const CameraRig: React.FC<{ bed: BedExtents; view: ViewMode; nonce: number }> = ({ bed, view, nonce }) => {
+    const { camera, controls } = useThree() as unknown as { camera: THREE.PerspectiveCamera; controls: any };
+    const anim = useRef<{ fromP: THREE.Vector3; toP: THREE.Vector3; fromT: THREE.Vector3; toT: THREE.Vector3; t: number } | null>(null);
 
-    // Stable callback so PathObject's useEffect doesn't re-run on every render
-    const handlePathGroupMount = useCallback((id: string, g: THREE.Group | null) => {
-        pathGroupRefs.current[id] = g;
-    }, []);
+    useEffect(() => {
+        if (!controls) return;
+        const size = Math.max(bed.width, bed.height, 50);
+        const fov = (camera.fov * Math.PI) / 180;
+        const aspect = Math.max(camera.aspect, 0.5);
+        // Distance so the bed fits both vertically and horizontally
+        const dist = (size / 2) / Math.tan(fov / 2) * Math.max(1, 1 / aspect) * 1.25;
+        const target = new THREE.Vector3(bed.centerX, bed.centerY, 0);
+        let pos: THREE.Vector3;
+        if (view === 'top') pos = new THREE.Vector3(bed.centerX, bed.centerY - dist * 0.0005, dist);
+        else if (view === 'front') pos = new THREE.Vector3(bed.centerX, bed.centerY - dist, Math.max(bed.depth, 40));
+        else pos = new THREE.Vector3(bed.centerX - dist * 0.25, bed.centerY - dist * 0.8, dist * 0.65);
+
+        controls.minAzimuthAngle = -Infinity;
+        controls.maxAzimuthAngle = Infinity;
+        controls.minPolarAngle = 0;
+        anim.current = { fromP: camera.position.clone(), toP: pos, fromT: controls.target.clone(), toT: target, t: 0 };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [nonce, controls, bed.width, bed.height, bed.centerX, bed.centerY]);
+
+    useFrame((_, delta) => {
+        const a = anim.current;
+        if (!a || !controls) return;
+        a.t = Math.min(1, a.t + delta / 0.45);
+        const e = 1 - Math.pow(1 - a.t, 3);
+        camera.position.lerpVectors(a.fromP, a.toP, e);
+        controls.target.lerpVectors(a.fromT, a.toT, e);
+        camera.up.set(0, 0, 1);
+        controls.update();
+        if (a.t >= 1) {
+            anim.current = null;
+            if (view === 'top') {
+                // Lock the 2D view: looking straight down, X right / Y up on screen.
+                controls.minPolarAngle = 0;
+                controls.maxPolarAngle = 0;
+                const az = controls.getAzimuthalAngle();
+                controls.minAzimuthAngle = az;
+                controls.maxAzimuthAngle = az;
+            }
+        }
+    });
+    return null;
+};
+
+const VisualizerScene: React.FC<VisualizerSceneProps> = ({
+    machinePos, limits, gcode = [], progressLine = -1, spindle = 0, laserBeamEnabled = false, machineSettings,
+    objects, onSelectObject, onObjectUpdate, mill, gcodeIsMill = false, gcodeTopZ = 0
+}) => {
+    const [view, setView] = useState<ViewMode>('3d');
+    const [viewNonce, setViewNonce] = useState(0);
+    const objectRefs = useRef<Record<string, THREE.Group | null>>({});
+    const [, forceRender] = useState(0);
 
     const [transformMode, setTransformMode] = useState<'translate' | 'rotate' | 'scale'>('translate');
-    const selectedObject = objects?.find(o => o.selected);
+    const selectedObject = objects?.find(o => o.selected && o.type !== 'gcode' && o.type !== 'stl');
+    const showMill = !!mill && (mill.active || gcodeIsMill);
+    // Artwork sits on top of the stock while milling
+    const objectLift = showMill && mill ? mill.stock.thickness : 0;
+    // Bed height of work Z0: the loaded mill program decides, otherwise the stock setup.
+    const workZ0 = !showMill || !mill ? 0
+        : gcodeIsMill ? mill.stock.thickness - gcodeTopZ
+        : mill.stock.zZero === 'bottom' ? 0 : mill.stock.thickness;
 
-    // Single selected path — only attach TransformControls when exactly 1 is chosen
-    const singlePathId = selectedPathIds.length === 1 ? selectedPathIds[0] : null;
+    // Refs are attached after the first render of a new selection; re-render once so the gizmo can attach.
+    useEffect(() => { forceRender(n => n + 1); }, [selectedObject?.id]);
 
-    // Transform Mode Shortcuts
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
+            const t = e.target as HTMLElement | null;
+            if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
             const key = e.key.toLowerCase();
             if (key === 't') setTransformMode('translate');
             else if (key === 'r') setTransformMode('rotate');
@@ -75,88 +127,91 @@ const VisualizerScene: React.FC<VisualizerSceneProps> = ({
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, []);
 
+    const bed = useMemo(
+        () => getBedExtents(machineSettings, limits),
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        [machineSettings?.workbench?.width, machineSettings?.workbench?.height, machineSettings?.workbench?.depth, machineSettings?.workbench?.origin, limits?.x?.max, limits?.y?.max]
+    );
 
-    // Dimensions from Settings (Priority) or Limits (Fallback)
-    const width = machineSettings?.workbench?.width || limits?.x?.max || 200;
-    const height = machineSettings?.workbench?.height || limits?.y?.max || 200;
-    const origin = machineSettings?.workbench?.origin || 'bottom-left';
+    const setPreset = (v: ViewMode) => { setView(v); setViewNonce(n => n + 1); };
 
-    let centerX = 0;
-    let centerY = 0;
+    const initialCam = useMemo<[number, number, number]>(
+        () => [bed.centerX, bed.centerY - Math.max(bed.width, bed.height) * 1.4, Math.max(bed.width, bed.height) * 1.1],
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        []
+    );
 
-    if (origin === 'bottom-left') {
-        centerX = width / 2;
-        centerY = height / 2;
-    } else if (origin === 'bottom-right') {
-        centerX = -width / 2;
-        centerY = height / 2;
-    } else if (origin === 'top-right') {
-        centerX = -width / 2;
-        centerY = -height / 2;
-    } else if (origin === 'top-left') {
-        centerX = width / 2;
-        centerY = -height / 2;
-    }
+    const commitTransform = () => {
+        if (!selectedObject || !onObjectUpdate) return;
+        const obj = objectRefs.current[selectedObject.id];
+        if (!obj) return;
+        const toDeg = (r: number) => Math.round(r * (180 / Math.PI) * 100) / 100;
+        onObjectUpdate(selectedObject.id, {
+            position: [obj.position.x, obj.position.y, selectedObject.position[2] || 0],
+            rotation: [0, 0, toDeg(obj.rotation.z)],
+            scale: [obj.scale.x, obj.scale.y, 1],
+        });
+    };
 
-    // Sky Lasers at Y=1000 to be "Above".
-    const targetCenter: [number, number, number] = [centerX, 0, -centerY];
-    const cameraPos: [number, number, number] = [centerX, 400, -centerY + 300];
+    const viewButton = (v: ViewMode, label: string, Icon: React.ComponentType<{ size?: number }>, title: string) => (
+        <button
+            title={title}
+            onClick={() => setPreset(v)}
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[11px] font-semibold tracking-wide transition-colors ${view === v ? 'bg-cyan-600 text-white' : 'text-slate-300 hover:bg-white/10 hover:text-white'}`}
+        >
+            <Icon size={14} /> {label}
+        </button>
+    );
 
     return (
-        <div ref={containerRef} className="w-full h-full relative bg-slate-900 overflow-hidden">
-            <Canvas shadows dpr={[1, 2]} camera={{ position: cameraPos, fov: 45, far: 8000 }}>
+        <div className="w-full h-full relative overflow-hidden bg-gradient-to-b from-slate-900 via-slate-900 to-slate-950">
+            <Canvas
+                shadows
+                dpr={[1, 2]}
+                camera={{ position: initialCam, up: [0, 0, 1], fov: 40, near: 0.5, far: 20000 }}
+                onPointerMissed={() => { /* clicking empty space keeps selection; use Esc in panels to clear */ }}
+            >
                 <OrbitControls
-                    ref={orbitRef}
                     makeDefault
-                    target={targetCenter}
-                    enableRotate={!is2D}
-                    enableZoom={true}
-                    enablePan={true}
-                    minDistance={10}
-                    maxDistance={2000}
+                    enableRotate={view !== 'top'}
+                    enableDamping
+                    dampingFactor={0.12}
+                    screenSpacePanning
+                    // Never orbit below the bed: Z must always point up/out of the screen
+                    maxPolarAngle={view === 'top' ? 0 : Math.PI / 2 - 0.03}
+                    minDistance={5}
+                    maxDistance={6000}
                 />
+                <CameraRig bed={bed} view={view} nonce={viewNonce} />
 
-                <ambientLight intensity={0.5} />
-                <pointLight position={[100, 200, 100]} intensity={0.8} />
+                <hemisphereLight args={['#e2e8f0', '#0f172a', 0.9]} />
+                <directionalLight position={[bed.centerX + 200, bed.centerY - 300, 600]} intensity={1.1} castShadow />
 
-                {/* Post Processing */}
-                <EffectComposer enableNormalPass={false}>
-                    <Bloom
-                        luminanceThreshold={1}
-                        mipmapBlur
-                        intensity={2.5}
-                        radius={0.8}
-                    />
-                </EffectComposer>
-
-                {/* Background Laser Animation */}
                 {laserBeamEnabled && (
                     <>
-                        <group position={[targetCenter[0], 1000, targetCenter[2] - 1000]}>
-                            <BackgroundLaser delay={0} spawnMode="vertical" height={6000} xRange={1000} zRange={100} particleSize={9} />
-                            <BackgroundLaser delay={3.5} spawnMode="vertical" height={6000} xRange={1000} zRange={100} particleSize={9} />
-                        </group>
-
-                        <group position={[0, -20, 0]}>
-                            <BackgroundLaser delay={1.5} spawnMode="flat" xRange={width || 300} zRange={height || 300} />
-                            <BackgroundLaser delay={5.0} spawnMode="flat" xRange={width || 300} zRange={height || 300} />
+                        <EffectComposer enableNormalPass={false}>
+                            <Bloom luminanceThreshold={1} mipmapBlur intensity={1.2} radius={0.6} />
+                        </EffectComposer>
+                        {/* BackgroundLaser is authored Y-up; this wrapper maps its local +Y onto machine +Z */}
+                        <group rotation={[Math.PI / 2, 0, 0]}>
+                            <group position={[bed.centerX, 1000, -bed.centerY - 1000]}>
+                                <BackgroundLaser delay={0} spawnMode="vertical" height={6000} xRange={1000} zRange={100} particleSize={9} />
+                                <BackgroundLaser delay={3.5} spawnMode="vertical" height={6000} xRange={1000} zRange={100} particleSize={9} />
+                            </group>
+                            <group position={[bed.centerX, -20, -bed.centerY]}>
+                                <BackgroundLaser delay={1.5} spawnMode="flat" xRange={bed.width} zRange={bed.height} />
+                                <BackgroundLaser delay={5.0} spawnMode="flat" xRange={bed.width} zRange={bed.height} />
+                            </group>
                         </group>
                     </>
                 )}
 
-                <group rotation={[-Math.PI / 2, 0, 0]}>
-                    <MachineBed
-                        limits={limits}
-                        width={width}
-                        height={height}
-                        visible={machineSettings?.workbench?.showWorkbench}
-                        origin={origin}
-                        axesSettings={machineSettings?.axes}
-                    />
-                    <MachineHead x={machinePos.x} y={machinePos.y} z={machinePos.z} />
+                <MachineBed bed={bed} visible={machineSettings?.workbench?.showWorkbench !== false} />
+                {/* Mill jobs are drawn relative to work Z0 (stock top or bottom), so the head follows the same offset */}
+                <MachineHead x={machinePos.x} y={machinePos.y} z={machinePos.z + workZ0} power={spindle} />
 
-                    {/* Render Scene Objects */}
-                    <Suspense fallback={null}>
+                <Suspense fallback={null}>
+                    <group position={[0, 0, objectLift]} visible={!mill?.sim || !showMill}>
                         {objects?.map(obj => (
                             <ObjectRenderer
                                 key={obj.id}
@@ -166,124 +221,82 @@ const VisualizerScene: React.FC<VisualizerSceneProps> = ({
                                 onSelect={() => onSelectObject && onSelectObject(obj.id)}
                             />
                         ))}
-                    </Suspense>
+                    </group>
+                </Suspense>
 
-                    {/* Transform Controls (Gizmo) */}
-                    {selectedObject && objectRefs.current[selectedObject.id] && (
-                        <TransformControls
-                            object={objectRefs.current[selectedObject.id]!}
-                            mode={transformMode}
-                            onObjectChange={() => {
-                                // Keep this empty if not needed continually, but it handles dragging state essentially
-                            }}
-                            onMouseUp={() => {
-                                // Sync transformations back to App State on drag end
-                                const obj = objectRefs.current[selectedObject.id];
-                                if (obj && onObjectUpdate) {
-                                    const newScale = [obj.scale.x, obj.scale.y, obj.scale.z] as [number, number, number];
-                                    // Scale might be 1 if just translated.
-                                    // Rotation is tricky (Euler vs Quaternion). ObjectRenderer uses Euler.
-                                    // TransformControls modifies position/rotation/scale of the object directly.
+                {selectedObject && objectRefs.current[selectedObject.id] && !(showMill && mill?.sim) && (
+                    <TransformControls
+                        object={objectRefs.current[selectedObject.id]!}
+                        mode={transformMode}
+                        // 2D artwork: move in XY, rotate about Z, scale in XY only
+                        showZ={transformMode === 'rotate'}
+                        showX={transformMode !== 'rotate'}
+                        showY={transformMode !== 'rotate'}
+                        onMouseUp={commitTransform}
+                    />
+                )}
 
-                                    onObjectUpdate(selectedObject.id, {
-                                        position: [obj.position.x, obj.position.y, obj.position.z],
-                                        rotation: [
-                                            obj.rotation.x * (180 / Math.PI),
-                                            obj.rotation.y * (180 / Math.PI),
-                                            obj.rotation.z * (180 / Math.PI)
-                                        ],
-                                        // Ensure scale is captured if scaled
-                                        scale: newScale
-                                    });
-                                }
-                            }}
-                        />
-                    )}
+                {showMill && mill && <MillScene {...mill} />}
 
-                    {previewContent && previewSize && (
-                        <PreviewLayer
-                            fileContent={previewContent}
-                            width={previewSize.width}
-                            height={previewSize.height}
-                            type={previewType || 'raster'}
-                        />
-                    )}
-                    <GCodeViewer gcode={gcode} />
+                <GCodeViewer
+                    gcode={gcode}
+                    progressLine={progressLine}
+                    zOffset={gcodeIsMill && mill ? mill.stock.thickness - gcodeTopZ : 0}
+                    colorBy={gcodeIsMill ? 'depth' : 'power'}
+                    depthTop={gcodeTopZ}
+                    visible={!(showMill && mill?.sim)}
+                />
 
-                    {/* Milling path overlay — rendered from analyzed DXF/SVG */}
-                    {detectedPaths && detectedPaths.length > 0 && onPathSelect && (
-                        <PathRenderer
-                            paths={detectedPaths}
-                            selectedIds={selectedPathIds}
-                            onSelect={onPathSelect}
-                            onGroupMount={handlePathGroupMount}
-                        />
-                    )}
-
-                    {/* TransformControls for a single selected milling path (translate only) */}
-                    {singlePathId && pathGroupRefs.current[singlePathId] && (
-                        <TransformControls
-                            object={pathGroupRefs.current[singlePathId]!}
-                            mode="translate"
-                            onMouseUp={() => {
-                                const g = pathGroupRefs.current[singlePathId];
-                                if (g && onPathMove) {
-                                    onPathMove(singlePathId, [
-                                        g.position.x,
-                                        g.position.y,
-                                        g.position.z,
-                                    ]);
-                                }
-                            }}
-                        />
-                    )}
-
-                    {/* Toolpath offset preview — green/orange/yellow HDR lines */}
-                    <ToolpathOverlay toolpaths={toolpathPolygons ?? []} />
-                </group>
+                <GizmoHelper alignment="bottom-right" margin={[70, 70]}>
+                    <GizmoViewport axisColors={['#ef4444', '#22c55e', '#3b82f6']} labelColor="#0f172a" />
+                </GizmoHelper>
             </Canvas>
 
-            {/* Controls Overlay */}
-            <div className="absolute top-2 left-2 flex flex-col gap-2 pointer-events-none">
-                <div className="text-[10px] text-gray-400 font-mono bg-black/60 p-2 rounded border border-white/10 shadow-lg">
-                    <p className="mb-1"><span className="text-gray-300 font-bold">Pan:</span> Right-Click</p>
-                    <p className="mb-1"><span className="text-gray-300 font-bold">View:</span> Left-Click</p>
-                    <p><span className="text-gray-300 font-bold">Mode (T/R/S):</span> <span className="text-blue-400">{transformMode.toUpperCase()}</span></p>
+            {/* View toolbar */}
+            <div className="absolute top-3 left-3 flex flex-col gap-2 pointer-events-auto">
+                <div className="flex gap-1 bg-slate-950/70 backdrop-blur p-1 rounded-lg border border-white/10 shadow-lg">
+                    {viewButton('3d', '3D', Box, '3D perspective view')}
+                    {viewButton('top', 'TOP', Square, '2D top view (XY plane, Z towards you)')}
+                    {viewButton('front', 'FRONT', RectangleHorizontal, 'Front view (XZ)')}
+                    <button
+                        title="Fit bed in view"
+                        onClick={() => setViewNonce(n => n + 1)}
+                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-md text-[11px] font-semibold text-slate-300 hover:bg-white/10 hover:text-white"
+                    >
+                        <Maximize size={14} /> FIT
+                    </button>
                 </div>
-            </div>
 
-            <div className="absolute top-2 left-[180px] pointer-events-auto flex flex-col gap-2">
                 {selectedObject && (
-                    <div className="flex gap-1 bg-black/60 p-1.5 rounded-lg border border-white/10 shadow-lg backdrop-blur-sm">
-                        <button
-                            title="Translate (T)"
-                            onClick={() => setTransformMode('translate')}
-                            className={`p-1.5 rounded transition-all ${transformMode === 'translate' ? 'bg-blue-600 text-white shadow-[0_0_10px_rgba(37,99,235,0.5)]' : 'text-gray-400 hover:text-white hover:bg-white/10'}`}
-                        >
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M5 9l-3 3 3 3M9 5l3-3 3 3M19 9l3 3-3 3M9 19l3 3 3 3M2 12h20M12 2v20" /></svg>
-                        </button>
-                        <button
-                            title="Rotate (R)"
-                            onClick={() => setTransformMode('rotate')}
-                            className={`p-1.5 rounded transition-all ${transformMode === 'rotate' ? 'bg-blue-600 text-white shadow-[0_0_10px_rgba(37,99,235,0.5)]' : 'text-gray-400 hover:text-white hover:bg-white/10'}`}
-                        >
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 6" /><path d="M21 3v6h-6" /></svg>
-                        </button>
-                        <button
-                            title="Scale (S)"
-                            onClick={() => setTransformMode('scale')}
-                            className={`p-1.5 rounded transition-all ${transformMode === 'scale' ? 'bg-blue-600 text-white shadow-[0_0_10px_rgba(37,99,235,0.5)]' : 'text-gray-400 hover:text-white hover:bg-white/10'}`}
-                        >
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 3l-6 6M21 3v6M21 3h-6M3 21l6-6M3 21v-6M3 21h6M14.5 9.5L9.5 14.5" /></svg>
-                        </button>
+                    <div className="flex gap-1 bg-slate-950/70 backdrop-blur p-1 rounded-lg border border-white/10 shadow-lg w-fit">
+                        {(['translate', 'rotate', 'scale'] as const).map(m => (
+                            <button
+                                key={m}
+                                title={`${m[0].toUpperCase() + m.slice(1)} (${m[0].toUpperCase()})`}
+                                onClick={() => setTransformMode(m)}
+                                className={`px-2.5 py-1.5 rounded-md text-[11px] font-semibold uppercase ${transformMode === m ? 'bg-blue-600 text-white' : 'text-slate-300 hover:bg-white/10'}`}
+                            >
+                                {m === 'translate' ? 'Move' : m}
+                            </button>
+                        ))}
                     </div>
                 )}
-                <button
-                    onClick={() => setIs2D(!is2D)}
-                    className="bg-black/60 hover:bg-white/10 text-gray-300 hover:text-white text-xs px-3 py-2 rounded-lg border border-white/10 shadow-lg font-bold transition-colors w-full tracking-wider"
-                >
-                    {is2D ? '3D VIEW' : '2D VIEW'}
-                </button>
+            </div>
+
+            {/* Position readout + legend */}
+            <div className="absolute bottom-3 left-3 pointer-events-none flex flex-col gap-1.5">
+                <div className="font-mono text-xs bg-slate-950/70 backdrop-blur px-3 py-2 rounded-lg border border-white/10 shadow-lg flex gap-4">
+                    <span><span className="text-red-400 font-bold">X</span> {machinePos.x.toFixed(2)}</span>
+                    <span><span className="text-green-400 font-bold">Y</span> {machinePos.y.toFixed(2)}</span>
+                    <span><span className="text-blue-400 font-bold">Z</span> {machinePos.z.toFixed(2)}</span>
+                </div>
+                <div className="text-[10px] text-slate-400 bg-slate-950/60 px-2 py-1 rounded border border-white/5 flex items-center gap-3">
+                    <span className="flex items-center gap-1"><span className="inline-block w-3 h-0.5 bg-red-500" /> {gcodeIsMill ? 'cut (yellow shallow → red deep)' : 'cut'}</span>
+                    <span className="flex items-center gap-1"><span className="inline-block w-3 h-0.5 border-t border-dashed border-sky-500" /> travel</span>
+                    <span className="flex items-center gap-1"><span className="inline-block w-3 h-0.5 bg-emerald-500" /> done</span>
+                    <span className="hidden md:inline">· Left-drag orbit · Right-drag pan · Wheel zoom</span>
+                    {laserBeamEnabled && <Sparkles size={10} className="text-cyan-400" />}
+                </div>
             </div>
         </div>
     );

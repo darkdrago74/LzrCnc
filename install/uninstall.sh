@@ -1,129 +1,68 @@
-#!/bin/bash
+#!/usr/bin/env bash
+# LzrCnc uninstall
+#   sudo bash install/uninstall.sh         remove service, command, packages and build (keeps your settings)
+#   sudo bash install/uninstall.sh --all   also delete your settings (soft/server/data)
+#   -y                                     do not ask for confirmation
+# Node.js and system packages are left installed (other programs may use them).
 
-# Default mode
-MODE="soft"
-AUTO_YES=false
-
-# Critical system packages that should NEVER be removed automatically
-# even if they are in requirement-simple.txt
-CRITICAL_PACKAGES=("sudo" "git" "systemd" "udev" "python3" "bash" "openssh-server" "nodejs" "npm")
-
-# Parse arguments
+set -u
+INSTALL_DIR="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
+ROOT="$(cd "$INSTALL_DIR/.." && pwd)"
+SOFT="$ROOT/soft"
+PORT=3001
+ALL=false
+YES=false
 for arg in "$@"; do
-    case $arg in
-        --all)
-        MODE="all"
-        shift
-        ;;
-        --soft)
-        MODE="soft"
-        shift
-        ;;
-        --clean)
-        MODE="soft"
-        shift
-        ;;
-        -y)
-        AUTO_YES=true
-        shift
-        ;;
+    case "$arg" in
+        --all) ALL=true ;;
+        --soft|--clean) ALL=false ;;
+        -y) YES=true ;;
     esac
 done
 
-# Function to prompt confirmation
+if [ "$(id -u)" -ne 0 ]; then
+    echo "Please run as root:  sudo bash $0 $*"
+    exit 1
+fi
+
 confirm() {
-    if [ "$AUTO_YES" = true ]; then
-        return 0
-    fi
-    read -p "$1 [y/N] " response
-    case "$response" in
-        [yY][eE][sS]|[yY]) 
-            return 0 
-            ;;
-        *)
-            return 1
-            ;;
-    esac
+    $YES && return 0
+    read -r -p "$1 [y/N] " r
+    [[ "$r" =~ ^([yY]|[yY][eE][sS])$ ]]
 }
 
-echo "Starting Uninstall (Mode: $MODE)..."
-
-# 0. Kill running processes
-echo "Checking for running processes..."
-
-# Stop Systemd Service if exists
-if systemctl list-unit-files | grep -q lzrcnc.service; then
-    echo "Stopping and disabling systemd service..."
-    systemctl stop lzrcnc
-    systemctl disable lzrcnc
+if [ -f /etc/systemd/system/lzrcnc.service ]; then
+    echo "Removing the systemd service..."
+    systemctl disable --now lzrcnc 2>/dev/null || true
     rm -f /etc/systemd/system/lzrcnc.service
-    systemctl daemon-reload
-    echo "Service removed."
+    systemctl daemon-reload 2>/dev/null || true
 fi
 
-pids=$(lsof -t -i:3000)
-if [ -n "$pids" ]; then
-    echo "Stopping active server processes..."
-    kill -9 $pids 2>/dev/null || true
+if [ -x "$ROOT/lzrcnc.sh" ]; then
+    LZRCNC_PORT=$PORT bash "$ROOT/lzrcnc.sh" stop >/dev/null 2>&1 || true
 fi
 
-# 1. Soft Uninstall (Project files)
-echo "Removing project dependencies and build artifacts..."
-rm -rf node_modules
-rm -rf server/node_modules
-rm -rf server/dist
-rm -rf client/node_modules
-rm -rf client/dist
-rm -rf client/.next
-rm -rf client/out
+if [ -L /usr/local/bin/lzrcnc ]; then
+    rm -f /usr/local/bin/lzrcnc
+    echo "Removed the 'lzrcnc' command."
+fi
 
-# Remove logs
-rm -rf logs
-rm -f *.log
-rm -f *.pid
+if command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state >/dev/null 2>&1; then
+    firewall-cmd --permanent --remove-port=${PORT}/tcp >/dev/null 2>&1 && firewall-cmd --reload >/dev/null 2>&1 || true
+fi
 
-echo "Project cleanup complete."
+echo "Removing npm packages and build output..."
+rm -rf "$SOFT/node_modules" "$SOFT/server/node_modules" "$SOFT/client/node_modules" \
+       "$SOFT/server/dist" "$SOFT/client/dist"
+rm -f "$INSTALL_DIR"/*.log
 
-# 2. All Uninstall (System packages)
-if [ "$MODE" = "all" ]; then
-    echo "WARNING: You have selected --all mode."
-    echo "This will attempt to remove system packages listed in requirement-simple.txt."
-    
-    if confirm "Are you sure you want to remove system packages?"; then
-        if [ -f "requirement-simple.txt" ]; then
-            while IFS= read -r package || [ -n "$package" ]; do
-                [[ $package =~ ^#.* ]] && continue
-                [ -z "$package" ] && continue
-                
-                # Check if package is critical
-                IS_CRITICAL=0
-                for crit in "${CRITICAL_PACKAGES[@]}"; do
-                    if [ "$package" == "$crit" ]; then
-                        IS_CRITICAL=1
-                        break
-                    fi
-                done
-
-                if [ $IS_CRITICAL -eq 1 ]; then
-                    echo "SKIP: $package is a critical system package. Keeping it."
-                    continue
-                fi
-
-                echo "Removing $package..."
-                if command -v apt-get &> /dev/null; then
-                    apt-get remove -y "$package"
-                else
-                    echo "apt-get not found, skipping removal of $package"
-                fi
-            done < "requirement-simple.txt"
-            
-            echo "System package removal complete."
-        else
-            echo "requirement-simple.txt not found, cannot remove system packages."
-        fi
-    else
-        echo "Skipping system package removal."
+if $ALL; then
+    if confirm "Also delete your machine settings, tools and materials (soft/server/data)?"; then
+        rm -rf "$SOFT/server/data"
+        echo "User data deleted."
     fi
+else
+    echo "Your settings in soft/server/data were kept."
 fi
 
-echo "Uninstallation Complete."
+echo "Uninstall complete. Node.js and system packages were left installed."
