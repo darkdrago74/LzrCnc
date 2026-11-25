@@ -26,9 +26,11 @@
     -   Warnings and errors: tool too large for a pocket (the pocket is named and skipped), cut deeper than the stock (into the spoilboard), through-cuts without a skin, stepdown larger than the tool, too-steep ramps or straight plunges, RPM above the tool max, chip load out of range.
     -   Material-removal simulation of the stock (scrubbable), estimated time, then the same Run-job wizard (origin on the stock corner, optional "Set Z0 here", spindle safety checklist).
     -   **Show on machine**: trace the stock outline or the cut area (incl. tool radius) a few mm above the stock, go to the first cut, lift to clearance; the frame is drawn as a green dashed rectangle in 3D.
+    -   **Zero, spindle & run** (step 6): set Z0 by hand or with a touch plate, Z-direction test, optional GRBL spindle control (`$32=0/1`, M3 test, M5), then **Run milling job…** opens the wizard directly. The tool library is edited in place from step 3 (the separate *CNC* tab was merged into *Mill*).
     -   *Example* button: 13 mm wood plate 200×200 → 8 mm square part with a 1 mm skin (side A), then flip and face 1 mm (side B) for a perfectly parallel part.
 -   **Job control**: Run-job wizard (homing, origin, bounds check, framing, safety confirmation), pause / resume / stop with ETA.
 -   **Hardware**: Native GRBL and Klipper support, plus a built-in simulator.
+-   **Machine profiles**: save several named machines (laser, mill, laser + mill), simulate any of them without hardware to prepare jobs, export / import them as files or send one straight to another LzrCnc (e.g. the Raspberry Pi).
 -   **Macros**: Editable user G-code macros and Klipper macros.
 -   **Smart Startup**: Auto-detects port conflicts and recovers from zombie processes.
 -   **Update System**: Safe in-place updates preserving user data.
@@ -46,6 +48,10 @@
 | ![Hex nut](docs/screenshots/laser-01-hex-nut-polygon.png) Polygon on a construction circle (M-nut presets) | ![Vector text](docs/screenshots/laser-02-vector-text.png) Text as cuttable vector outlines |
 | ![Profiles](docs/screenshots/laser-03-objects-and-profiles.png) Objects grouped by operation profile | ![Burn preview](docs/screenshots/laser-04-raster-burn-preview.png) Raster tone curve and burn preview |
 
+| Machines | |
+|---|---|
+| ![Machine profiles](docs/screenshots/16_machine_profiles.png) Settings › Machines: name, type, export, send to the Pi | ![Simulate a machine](docs/screenshots/17_simulate_machine.png) Simulate a saved machine without hardware |
+
 More in [docs/screenshots](docs/screenshots).
 
 ## Installation
@@ -56,7 +62,7 @@ Once started, everything (web UI + API) is served on **one port: `http://<comput
 ### Windows
 1. Install **Node.js 22 LTS** from <https://nodejs.org/> (default options).
 2. Double-click **`install\install.bat`** (no administrator rights needed). It installs the npm packages and builds the web UI.
-3. Double-click **`start.bat`**. The browser opens on `http://localhost:3001` when the server is ready. Close the window (or Ctrl+C) to stop.
+3. Double-click **`start.bat`**. The browser opens on `http://127.0.0.1:3001` when the server is ready. Close the window (or Ctrl+C) to stop.
 
 ```bat
 start.bat          :: real machine (GRBL / Klipper)
@@ -118,6 +124,16 @@ In development the Vite dev server proxies API calls to the server (`LZR_API_TAR
 - Use the **Hardware Parameters** tab to fine-tune your machine's speeds, accelerations, and travel limits directly on the EEPROM.
 - **Controls**: Homing (`$H`) and Unlock (`$X`) are available in the setup tab.
 
+### Machine profiles
+Each LzrCnc keeps a list of named machines (`soft/server/data/machines.json`; an older `machine_settings.json` is imported automatically as "My machine").
+The **active** machine sets the bed shown in the visualizer, the CAM limits and the simulator.
+
+-   **Settings → Machines**: pick the machine to edit, rename it, set its type (laser / mill / laser + mill), max S (`$30`) and notes, then **Save**. **New**, **Duplicate**, **Delete**, **Set active**.
+-   **Prepare a job offline**: in **Connection**, choose the machine, then **Simulate "name"**. You get a virtual machine with that bed size (jog, framing, run job); no hardware or `npm run sim` needed. CAM works even without connecting.
+-   **Connect**: the port / baud (or Klipper host) used is stored in the active machine, so it is filled in next time.
+-   **Update the Raspberry Pi from your PC**: edit the machine on the PC, then in **Share this machine** type the Pi address (e.g. `192.168.1.20:3001`) and click **Send**. With "Update the machine with the same name there" it replaces the Pi's profile of that name and keeps the Pi's own serial port; otherwise it adds a copy. Alternatively **Export file** and **Import file** on the other device.
+-   The active machine cannot be switched or replaced while real hardware is connected or a job is running (disconnect first). Switching is allowed while simulating.
+
 ### Coordinate convention
 All machine and CAM coordinates are in millimetres with the origin at the bed's home corner (front-left by default, configurable in **Settings → Axis Configuration**):
 +X to the right, +Y towards the back, +Z up (away from the bed). The visualizer always shows XY as the bed plane with Z pointing up; the camera cannot orbit below the bed.
@@ -155,5 +171,8 @@ Node.js and system packages are left installed. On Windows simply delete the fol
 -   **"Port 3001 is used by another program"**: another application uses the port. Close it, or start with another port: `LZRCNC_PORT=3005 lzrcnc` (Linux) / `set LZRCNC_PORT=3005` then `start.bat` (Windows).
 -   **Serial port "permission denied" (Linux)**: log out and in again after the install (the `dialout` group is applied at login), check with `groups`.
 -   **Cannot reach the Pi from another computer**: use `http://<pi-ip>:3001` (shown at start). On Fedora the installer opens the port in firewalld; with another firewall open TCP 3001.
+-   **Cannot reach a Windows PC from a phone**: use the `Network :` address printed by `start.bat`, on the same Wi-Fi. If Windows Firewall blocks "Node.js JavaScript Runtime" (Windows Defender Firewall > Allow an app), allow it for Private networks (needs admin rights).
+-   **Blank / dark page in the browser**: press Ctrl+F5. If the app still cannot start, the page shows the reason (blocked script, startup error); press F12 > Console for details.
+-   **"Edge opened this page in Internet Explorer mode"** (company PCs): an Edge policy sends `localhost` to IE mode, which cannot run the app. Use `http://127.0.0.1:3001` (what `start.bat` opens) or the network address.
 -   **`$'\r': command not found` / `syntax error near unexpected token` on Linux**: the `.sh` files were saved with Windows line endings. The repository's `.gitattributes` keeps them LF; if you copied files by hand run `sed -i 's/\r$//' lzrcnc.sh install/*.sh`.
 -   **Files owned by root after a manual `sudo npm ...`**: `sudo chown -R $USER:$USER .` in the project folder (the installer does this automatically).

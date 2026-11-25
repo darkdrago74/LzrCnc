@@ -12,7 +12,7 @@ import settingsRoutes from './routes/settings.js'; // Import Settings Routes
 import toolRoutes from './routes/tools.js';
 import cncRoutes from './routes/cnc.js';
 import { MaterialService } from './services/MaterialService.js'; // Added import for MaterialService
-import { SettingsService } from './services/SettingsService.js'; // Import SettingsService
+import { SettingsService, type MachineSettings } from './services/SettingsService.js'; // Import SettingsService
 import { CamService } from './cam/CamService.js'; // Corrected import path
 import path from 'path'; // Added import for path module
 
@@ -50,24 +50,49 @@ const settingsService = new SettingsService(dataDir); // Instantiate SettingsSer
 
 server.register(camRoutes, { camService });
 server.register(materialRoutes, { materialService });
-server.register(settingsRoutes, { settingsService }); // Register Settings Routes
+server.register(settingsRoutes, { settingsService, canSwitchMachine: () => machineSwitchBlocker() }); // Register Settings Routes
 server.register(toolRoutes);
 server.register(cncRoutes);
 
-// SPA Fallback: serve index.html for unknown routes (React Router support)
+// SPA Fallback: serve index.html for unknown routes (React Router support).
+// Missing files (assets, API) get a real 404 so the browser reports them instead of parsing HTML as JavaScript.
 server.setNotFoundHandler((req, reply) => {
-    (reply as any).sendFile('index.html');
+    const urlPath = req.url.split('?')[0];
+    if (req.method !== 'GET' || urlPath.startsWith('/api/') || urlPath.startsWith('/assets/') || /\.[a-z0-9]+$/i.test(urlPath)) {
+        return reply.code(404).send({ error: 'Not found', path: urlPath });
+    }
+    return (reply as any).sendFile('index.html');
 });
 
 
 let machine: MachineInterface | null = null;
+let machineType: 'grbl' | 'klipper' | 'mock' | null = null;
 const jobRunner = new JobRunner();
 const REALTIME_COMMANDS = new Set(['!', '~', '?', '\x18']);
 const isSim = process.env.MOCK_HARDWARE === 'true' || process.argv.includes('--sim');
 
+/** The active machine profile may change freely, except while it drives real hardware or a job. */
+function machineSwitchBlocker(): string | null {
+    if (jobRunner.isActive()) return 'A job is running. Stop it before changing the machine.';
+    if (machine && machineType !== 'mock') return 'Disconnect the machine before switching to another profile.';
+    return null;
+}
+
+/** The simulator takes its travel limits from the active machine profile. */
+function limitsFromSettings(s: MachineSettings) {
+    return {
+        x: { min: 0, max: s.workbench.width },
+        y: { min: 0, max: s.workbench.height },
+        z: { min: 0, max: s.workbench.depth },
+    };
+}
+
 if (isSim) {
     console.log('[SIMULATION] Mode Active. Using MockController.');
-    machine = new MockController();
+    const mock = new MockController();
+    machine = mock;
+    machineType = 'mock';
+    settingsService.getSettings().then(s => mock.setLimits(limitsFromSettings(s))).catch(() => { /* defaults */ });
     machine.connect('mock-device'); // Auto-connect in sim mode
 }
 
@@ -121,6 +146,7 @@ server.get('/api/ports', async (request, reply) => {
 async function disconnectMachine() {
     const m = machine;
     machine = null;
+    machineType = null;
     jobRunner.abandon('Machine disconnected');
     if (m) {
         try { await m.disconnect(); } catch (e) { server.log.warn(e); }
@@ -128,7 +154,7 @@ async function disconnectMachine() {
 }
 
 server.post('/connect', async (request: any, reply) => {
-    const { type, port, baud, host } = request.body ?? {};
+    const { type, port, baud, host, machineId } = request.body ?? {};
     if (!['grbl', 'klipper', 'mock'].includes(type)) {
         return reply.code(400).send({ error: 'Invalid machine type' });
     }
@@ -137,6 +163,16 @@ server.post('/connect', async (request: any, reply) => {
     }
 
     await disconnectMachine();
+
+    // Connect "as" a saved machine profile: it becomes the active one (bed, limits, simulator size)
+    let profileSettings: MachineSettings;
+    try {
+        profileSettings = machineId
+            ? (await settingsService.setActive(String(machineId))).settings
+            : await settingsService.getSettings();
+    } catch (e: any) {
+        return reply.code(e?.statusCode ?? 500).send({ error: e?.message ?? String(e) });
+    }
 
     let next: MachineInterface;
     try {
@@ -147,7 +183,9 @@ server.post('/connect', async (request: any, reply) => {
             next = new KlipperController();
             await next.connect(host);
         } else {
-            next = new MockController();
+            const mock = new MockController();
+            mock.setLimits(limitsFromSettings(profileSettings));
+            next = mock;
             await next.connect('mock-device');
         }
     } catch (e: any) {
@@ -156,6 +194,14 @@ server.post('/connect', async (request: any, reply) => {
     }
     next.on('error', (err: Error) => server.log.error(err));
     machine = next;
+    machineType = type;
+    // Remember the port / host for this machine (not for the simulator)
+    if (type !== 'mock') {
+        const active = await settingsService.getActive();
+        await settingsService.updateMachine(active.id, {
+            connection: type === 'grbl' ? { type, port, baud } : { type, host },
+        }).catch(e => server.log.warn(e));
+    }
     return { status: 'connected', type };
 });
 
@@ -236,8 +282,16 @@ function getCachedIp() {
 
 server.get('/status', async () => {
     const status = machine ? machine.getStatus() : { state: 'Disconnected' };
-    const settings = await settingsService.getSettings(); // cached in memory after first read
-    return { ...status, ip: getCachedIp(), machineSettings: settings, job: jobRunner.getStatus() };
+    const active = await settingsService.getActive(); // cached in memory after first read
+    if (machine instanceof MockController) machine.setLimits(limitsFromSettings(active.settings));
+    return {
+        ...status,
+        ip: getCachedIp(),
+        machineSettings: active.settings,
+        activeMachine: { id: active.id, name: active.name, kind: active.kind },
+        connectionType: machineType,
+        job: jobRunner.getStatus(),
+    };
 });
 
 const { AIGcodeOptimizer } = require('./cam/processors/AIGcodeOptimizer');
@@ -261,7 +315,19 @@ const start = async () => {
     try {
         const port = Number(process.env.PORT) || 3001;
         await server.listen({ port, host: '0.0.0.0' });
-        console.log(`Server listening on http://0.0.0.0:${port}`);
+        const virtual = /vEthernet|WSL|Hyper-V|VirtualBox|VMware|docker|^br-|^veth|^virbr|Loopback/i;
+        const lanUrls = Object.entries(os.networkInterfaces())
+            .filter(([name]) => !virtual.test(name))
+            .flatMap(([name, addrs]) => (addrs ?? [])
+                .filter(a => a.family === 'IPv4' && !a.internal)
+                .map(a => `http://${a.address}:${port}   (${name})`));
+        console.log('');
+        console.log(`  LzrCnc is running on port ${port}`);
+        // 127.0.0.1 rather than localhost: enterprise Edge policies often force "localhost" into Internet Explorer mode
+        console.log(`  This computer : http://127.0.0.1:${port}`);
+        for (const url of lanUrls) console.log(`  Network       : ${url}`);
+        if (lanUrls.length === 0) console.log('  Network       : no network address found');
+        console.log('');
     } catch (err) {
         server.log.error(err);
         process.exit(1);

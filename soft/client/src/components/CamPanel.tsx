@@ -7,13 +7,12 @@ import type { MachineSettings } from '../types';
 import { LaserOperationStack } from './cam/LaserOperationStack';
 import { OperationSettings } from './cam/OperationSettings';
 import type { CamOperation, OperationType } from './cam/interfaces';
-import { CncPanel } from './cnc/CncPanel';
 import { DesignerToolbar, type ShapeKind } from './cam/DesignerToolbar';
 import { DrawingModal, type DrawnObject } from './cam/DrawingModal';
 import { HelpIcon } from './ui/Tooltip';
 import { ObjectProperties } from './cam/ObjectProperties';
 import { MillPanel, type MillController } from './cam/MillPanel';
-import { Zap, Wrench, Library, FlaskConical, Trash2, Drill, Copy } from 'lucide-react';
+import { Zap, Library, FlaskConical, Trash2, Drill, Copy } from 'lucide-react';
 import type { ParametricConfig, SceneObject } from '../types';
 import { getBedExtents } from '../utils/machineGeometry';
 import { getSvgInfo } from '../utils/svgUtils';
@@ -21,7 +20,7 @@ import { SKIP_OPERATION, buildLaserJob, defaultOperation, isRasterObject, isVect
 import { usePersistentState } from '../utils/usePersistentState';
 import { formatDuration } from '../utils/gcodeParser';
 
-export type CamTab = 'laser' | 'cnc' | 'mill' | 'materials' | 'generator';
+export type CamTab = 'laser' | 'mill' | 'materials' | 'generator';
 
 interface CamPanelProps {
     onGenerate: (gcode: string) => void;
@@ -35,12 +34,11 @@ interface CamPanelProps {
     mill?: MillController;
     activeTab?: CamTab;
     onTabChange?: (tab: CamTab) => void;
-    onCommand?: (cmd: string) => void;
 }
 
 const CamPanel: React.FC<CamPanelProps> = ({
     onGenerate, objects, setObjects, setSidebarWidth, machineSettings, maxS = 1000,
-    mill, activeTab: tabProp, onTabChange, onCommand
+    mill, activeTab: tabProp, onTabChange
 }) => {
     const [fileName, setFileName] = useState<string | null>(null);
     // Operation profiles are kept across tab switches and reloads.
@@ -91,7 +89,6 @@ const CamPanel: React.FC<CamPanelProps> = ({
 
     const items = [
         { id: 'laser', icon: Zap, label: 'Laser' },
-        { id: 'cnc', icon: Wrench, label: 'CNC' },
         { id: 'mill', icon: Drill, label: 'Mill' },
         { id: 'materials', icon: Library, label: 'Lib' },
         { id: 'generator', icon: FlaskConical, label: 'Test' },
@@ -386,7 +383,7 @@ const CamPanel: React.FC<CamPanelProps> = ({
                 {/* Fixed Header for Toggle */}
                 <div className="flex items-center gap-3 p-2 border-b border-white/10 bg-black/40 backdrop-blur shrink-0">
                     <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest pl-2">
-                        {activeTab === 'laser' ? 'Laser CAM' : activeTab === 'mill' ? 'Mill CAM · 2.5D' : activeTab === 'cnc' ? 'CNC setup & tools' : activeTab}
+                        {activeTab === 'laser' ? 'Laser CAM' : activeTab === 'mill' ? 'Mill CAM · 2.5D' : activeTab}
                     </span>
                     {/* Hidden by user request (default adaptive width is correct)
                     <button
@@ -621,7 +618,6 @@ const CamPanel: React.FC<CamPanelProps> = ({
                         </>
                     )}
 
-                    {activeTab === 'cnc' && <CncPanel onCommand={onCommand} />}
                     {activeTab === 'materials' && <MaterialsPanel onSelect={applyMaterial} />}
                     {activeTab === 'generator' && <TestGeneratorPanel onGenerate={handleTestGenerate} />}
 
@@ -635,7 +631,7 @@ const CamPanel: React.FC<CamPanelProps> = ({
                                 </div>
                             </div>
                             {mill
-                                ? <MillPanel mill={mill} onOpenTools={() => setActiveTab('cnc')} />
+                                ? <MillPanel mill={mill} />
                                 : <p className="text-xs text-gray-500">Milling workspace unavailable.</p>}
                         </div>
                     )}

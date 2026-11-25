@@ -109,6 +109,11 @@ export class MockController extends EventEmitter implements MachineInterface {
         return this.status;
     }
 
+    /** Travel limits reported to the UI (taken from the active machine profile). */
+    setLimits(limits: NonNullable<MachineStatus['limits']>): void {
+        this.status.limits = limits;
+    }
+
     async command(gcode: string): Promise<void> {
         if (gcode === '!') return this.feedHold();
         if (gcode === '~') return this.cycleResume();

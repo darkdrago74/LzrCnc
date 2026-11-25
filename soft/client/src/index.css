@@ -141,3 +141,51 @@ button {
 .custom-scrollbar::-webkit-scrollbar-track {
   background: transparent;
 }
+
+/* ── Brand logo (top of the visualizer) ── */
+.lzr-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.35rem 1rem 0.45rem 0.6rem;
+  border-radius: 9999px;
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.72), rgba(2, 6, 23, 0.55));
+  border: 1px solid rgba(34, 211, 238, 0.18);
+  box-shadow: 0 0 24px rgba(6, 182, 212, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(8px);
+}
+.lzr-wordmark {
+  font-weight: 800;
+  font-size: 1.35rem;
+  letter-spacing: 0.06em;
+  font-style: italic;
+  text-shadow: 0 0 12px rgba(34, 211, 238, 0.45);
+}
+.lzr-beam {
+  position: absolute;
+  left: -4px;
+  right: -10px;
+  bottom: -5px;
+  height: 2px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, #ffffff 0%, #67e8f9 18%, rgba(6, 182, 212, 0.6) 60%, transparent 100%);
+  box-shadow: 0 0 8px #22d3ee;
+  overflow: hidden;
+}
+.lzr-beam::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 30%;
+  background: linear-gradient(90deg, transparent, #ffffff, transparent);
+  animation: lzr-sweep 4s ease-in-out infinite;
+}
+@keyframes lzr-sweep {
+  0% { left: -30%; opacity: 0; }
+  10% { opacity: 1; }
+  45%, 100% { left: 100%; opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lzr-beam::after { animation: none; display: none; }
+}

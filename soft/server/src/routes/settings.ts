@@ -1,5 +1,5 @@
 import { FastifyInstance } from 'fastify';
-import { SettingsService, MachineSettings } from '../services/SettingsService.js';
+import { SettingsService, MachineSettings, SettingsError } from '../services/SettingsService.js';
 import { exec } from 'child_process';
 import util from 'util';
 import { resolvePath } from '../utils/pathUtils.js';
@@ -8,8 +8,76 @@ import fs from 'fs';
 
 const execAsync = util.promisify(exec);
 
-export default async function settingsRoutes(server: FastifyInstance, options: { settingsService: SettingsService }) {
+export default async function settingsRoutes(server: FastifyInstance, options: { settingsService: SettingsService; canSwitchMachine?: () => string | null }) {
     const { settingsService } = options;
+
+    const fail = (reply: any, error: unknown) => {
+        if (error instanceof SettingsError) return reply.status(error.statusCode).send({ error: error.message });
+        server.log.error(error);
+        return reply.status(500).send({ error: (error as Error)?.message ?? 'Machine settings error' });
+    };
+
+    // ── Named machine profiles ──
+    server.get('/api/machines', async (_req, reply) => {
+        try { return await settingsService.listMachines(); } catch (e) { return fail(reply, e); }
+    });
+
+    server.post<{ Body: any }>('/api/machines', async (req, reply) => {
+        try { return await settingsService.createMachine(req.body ?? {}); } catch (e) { return fail(reply, e); }
+    });
+
+    server.put<{ Params: { id: string }; Body: any }>('/api/machines/:id', async (req, reply) => {
+        try { return await settingsService.updateMachine(req.params.id, req.body ?? {}); } catch (e) { return fail(reply, e); }
+    });
+
+    server.delete<{ Params: { id: string } }>('/api/machines/:id', async (req, reply) => {
+        try {
+            const active = await settingsService.getActive();
+            if (active.id === req.params.id) {
+                const blocked = options.canSwitchMachine?.();
+                if (blocked) return reply.status(409).send({ error: blocked });
+            }
+            return await settingsService.deleteMachine(req.params.id);
+        } catch (e) { return fail(reply, e); }
+    });
+
+    server.post<{ Params: { id: string } }>('/api/machines/:id/activate', async (req, reply) => {
+        try {
+            const active = await settingsService.getActive();
+            if (active.id !== req.params.id) {
+                const blocked = options.canSwitchMachine?.();
+                if (blocked) return reply.status(409).send({ error: blocked });
+            }
+            return await settingsService.setActive(req.params.id);
+        } catch (e) { return fail(reply, e); }
+    });
+
+    server.get<{ Params: { id: string } }>('/api/machines/:id/export', async (req, reply) => {
+        try {
+            const file = await settingsService.exportMachine(req.params.id);
+            const safe = file.machine.name.replace(/[^\w.-]+/g, '_').replace(/^_+|_+$/g, '') || 'machine';
+            reply.header('Content-Disposition', `attachment; filename="lzrcnc-machine-${safe}.json"`);
+            return file;
+        } catch (e) { return fail(reply, e); }
+    });
+
+    // Body: { data: <export file>, targetId?, matchByName?, keepConnection?, activate? }
+    server.post<{ Body: any }>('/api/machines/import', async (req, reply) => {
+        try {
+            const { data, targetId, matchByName, keepConnection, activate } = (req.body ?? {}) as Record<string, any>;
+            const store = await settingsService.listMachines();
+            const replacingActive = targetId === store.activeId
+                || (matchByName && typeof data?.machine?.name === 'string'
+                    && store.machines.find(m => m.id === store.activeId)?.name.toLowerCase() === data.machine.name.trim().toLowerCase());
+            if (activate || replacingActive) {
+                const blocked = options.canSwitchMachine?.();
+                if (blocked) return reply.status(409).send({ error: blocked });
+            }
+            return await settingsService.importMachine(data, { targetId, matchByName, keepConnection, activate });
+        } catch (e) { return fail(reply, e); }
+    });
+
+    // ── Active machine (kept for older clients) ──
 
     server.get('/api/settings/machine', async (request, reply) => {
         try {

@@ -30,7 +30,35 @@ export interface MachineStatus {
     };
     macros?: string[];
     machineSettings?: MachineSettings;
+    /** Saved machine profile currently active on the server */
+    activeMachine?: { id: string; name: string; kind: MachineKind };
+    connectionType?: 'grbl' | 'klipper' | 'mock' | null;
     grblSettings?: Record<number, number>; // $30, $32, etc.
+}
+
+export type MachineKind = 'laser' | 'mill' | 'laser+mill';
+
+export interface MachineConnection {
+    type: 'grbl' | 'klipper';
+    port?: string;
+    baud?: number;
+    host?: string;
+}
+
+/** A named, saved machine (server data/machines.json). */
+export interface MachineProfile {
+    id: string;
+    name: string;
+    kind: MachineKind;
+    notes?: string;
+    connection: MachineConnection;
+    settings: MachineSettings;
+    updatedAt: string;
+}
+
+export interface MachineStore {
+    activeId: string;
+    machines: MachineProfile[];
 }
 
 export interface AxisSettings {
@@ -62,6 +90,8 @@ export interface MachineSettings {
         y: AxisSettings;
         z: AxisSettings;
     };
+    /** S value for 100 % laser power / spindle (GRBL $30) when the controller does not report it */
+    spindleMax?: number;
     macros: any[];
 }
 

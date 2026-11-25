@@ -3,13 +3,58 @@
 
 <head>
   <meta charset="UTF-8" />
-  <link rel="icon" type="image/png" href="/favicon_new.png" />
+  <link rel="icon" type="image/svg+xml" href="/logo-mark.svg" />
+  <link rel="alternate icon" type="image/png" href="/favicon_new.png" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>LzrCnc</title>
 </head>
 
 <body>
-  <div id="root"></div>
+  <div id="root">
+    <div id="lzr-boot" style="font-family:system-ui,sans-serif;color:#94a3b8;padding:2rem;max-width:46rem">
+      <div id="lzr-boot-msg">Loading LzrCnc…</div>
+    </div>
+  </div>
+  <script>
+    // Plain script (runs even if the app bundle cannot): shows why the app did not start instead of an empty page.
+    (function () {
+      var shown = false;
+      function show(title, detail) {
+        var box = document.getElementById('lzr-boot-msg');
+        if (!box || shown) return;
+        shown = true;
+        box.style.color = '#fca5a5';
+        box.textContent = '';
+        var h = document.createElement('h2'); h.textContent = title; box.appendChild(h);
+        var pre = document.createElement('pre');
+        pre.style.cssText = 'white-space:pre-wrap;background:#0b1220;color:#e2e8f0;padding:1rem;border-radius:6px';
+        pre.textContent = detail + '\n\nBrowser: ' + navigator.userAgent +
+          '\n\nTry: Ctrl+F5 to reload without cache, or Edge Settings > Privacy > Clear browsing data for this site.' +
+          '\nPress F12 > Console for more details.';
+        box.appendChild(pre);
+      }
+      window.addEventListener('error', function (e) {
+        var t = e.target;
+        if (t && t !== window && (t.src || t.href)) show('A file of the app could not be loaded', String(t.src || t.href));
+        else show('The app failed to start', String(e.message) + (e.filename ? '\n' + e.filename + ':' + e.lineno : ''));
+      }, true);
+      window.addEventListener('unhandledrejection', function (e) {
+        show('The app failed to start', String(e.reason && (e.reason.stack || e.reason)));
+      });
+      if (/Trident\/|MSIE /.test(navigator.userAgent)) {
+        var alt = 'http://127.0.0.1' + (location.port ? ':' + location.port : '') + location.pathname;
+        show('Edge opened this page in Internet Explorer mode',
+          'LzrCnc needs a modern browser engine; Internet Explorer mode cannot run it.\n' +
+          'Your organisation\'s Edge policy forces "' + location.hostname + '" into IE mode.\n\n' +
+          'Open this address instead:  ' + alt);
+        return;
+      }
+      setTimeout(function () {
+        show('The app did not start within 20 seconds', 'The page loaded but the JavaScript application never ran. ' +
+          'It may be blocked by a browser extension or a security setting.');
+      }, 20000);
+    })();
+  </script>
   <script type="module" src="/src/main.tsx"></script>
 </body>
 

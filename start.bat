@@ -37,10 +37,10 @@ set "MOCK_HARDWARE="
 if /I "%MODE%"=="sim" set "MOCK_HARDWARE=true"
 echo ==========================================
 if /I "%MODE%"=="sim" (echo   LzrCnc - simulator, no hardware) else (echo   LzrCnc)
-echo   Open: http://localhost:%PORT%
+echo   Open: http://127.0.0.1:%PORT%
 echo   Stop: Ctrl+C or close this window
 echo ==========================================
-if not "%LZRCNC_NO_BROWSER%"=="1" start "" /b powershell -NoProfile -WindowStyle Hidden -Command "for($i=0;$i -lt 90;$i++){try{Invoke-WebRequest 'http://localhost:%PORT%/ping' -UseBasicParsing -TimeoutSec 2 | Out-Null; Start-Process 'http://localhost:%PORT%'; break}catch{Start-Sleep 1}}"
+if not "%LZRCNC_NO_BROWSER%"=="1" start "" /b powershell -NoProfile -WindowStyle Hidden -Command "for($i=0;$i -lt 90;$i++){try{Invoke-WebRequest 'http://127.0.0.1:%PORT%/ping' -UseBasicParsing -TimeoutSec 2 | Out-Null; Start-Process 'http://127.0.0.1:%PORT%'; break}catch{Start-Sleep 1}}"
 cd /d "%SOFT%\server"
 set "NODE_ENV=production"
 node --disable-warning=DEP0205 --import tsx src/index.ts
@@ -51,7 +51,7 @@ call :freeport 3000 || goto :fail
 call :freeport 3001 || goto :fail
 echo ==========================================
 echo   LzrCnc developer mode
-echo   Open: http://localhost:3000
+echo   Open: http://127.0.0.1:3000
 echo ==========================================
 cd /d "%SOFT%"
 call npm run dev

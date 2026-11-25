@@ -12,7 +12,8 @@ export interface CncTool {
     maxRPM?: number;
 }
 
-export const ToolManager: React.FC = () => {
+/** Tool library editor. `onChange` fires after a tool is saved or deleted. */
+export const ToolManager: React.FC<{ onChange?: () => void }> = ({ onChange }) => {
     const [tools, setTools] = useState<CncTool[]>([]);
     const [editing, setEditing] = useState<Partial<CncTool> | null>(null);
     const [showCalculator, setShowCalculator] = useState(false);
@@ -60,6 +61,7 @@ export const ToolManager: React.FC = () => {
             if (res.ok) {
                 setEditing(null);
                 fetchTools();
+                onChange?.();
             }
         } catch (err) {
             console.error(err);
@@ -71,17 +73,18 @@ export const ToolManager: React.FC = () => {
         try {
             await fetch(apiUrl(`/api/tools/${id}`), { method: 'DELETE' });
             fetchTools();
+            onChange?.();
         } catch (err) {
             console.error(err);
         }
     };
 
     return (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-white">
+        <div className="grid grid-cols-1 gap-4 text-white">
             {/* Tool List */}
             <div className="bg-black/40 border border-white/10 rounded p-4">
                 <div className="flex justify-between items-center mb-4">
-                    <h3 className="text-lg font-bold">Tool Library</h3>
+                    <h3 className="text-sm font-bold">Tool library</h3>
                     <button
                         onClick={() => setEditing({ type: 'endmill', material: 'carbide', flutes: 2, diameter: 3.175 })}
                         className="bg-blue-600 hover:bg-blue-500 text-white rounded p-1"

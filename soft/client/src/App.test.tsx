@@ -5,8 +5,8 @@ import App from './App';
 describe('App Component', () => {
     it('renders the brand and connection panel', () => {
         render(<App />);
-        expect(screen.getByText('LZR')).toBeDefined();
-        expect(screen.getByText(/Simulator/i)).toBeDefined();
+        expect(screen.getByLabelText('LzrCnc')).toBeDefined();
+        expect(screen.getByText(/Simulate/i)).toBeDefined();
     });
 
     it('renders navigation buttons', () => {

@@ -16,7 +16,7 @@ import {
 } from './utils/millJob';
 
 import { Sidebar } from './components/Sidebar';
-import { BackgroundFX } from './components/BackgroundFX';
+import { BrandLogo, LogoMark } from './components/Logo';
 import MachineSettingsPanel from './components/MachineSettingsPanel';
 import { JobWizardModal } from './components/cnc/JobWizardModal';
 import { apiGet, apiPost, API_URL } from './api';
@@ -56,6 +56,8 @@ function App() {
 
   // Live preview of settings being edited (overrides server settings while editing)
   const [draftSettings, setDraftSettings] = useState<MachineSettings | null>(null);
+  // Unsaved edits are previewed only while the settings panel is open
+  const shownSettings = (activeTab === 'settings' && draftSettings) || status.machineSettings;
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [wizardOpen, setWizardOpen] = useState(false);
 
@@ -143,7 +145,7 @@ function App() {
     } catch (e) { report(e); }
   };
 
-  const maxS = status.grblSettings?.[30] || 1000;
+  const maxS = status.grblSettings?.[30] || status.machineSettings?.spindleMax || 1000;
 
   const handleLaserTest = async (powerPct: number, duration: number) => {
     const sVal = Math.floor((powerPct / 100) * maxS);
@@ -291,6 +293,7 @@ function App() {
     machineReady: status.state === 'Idle' && status.job?.state !== 'running' && status.job?.state !== 'paused',
     machineState: status.state,
     sendCommands: async (cmds: string[]) => { for (const c of cmds) await handleCommand(c); },
+    runJob: () => { if (millResult?.gcode) { setGcode(millResult.gcode.split(/\r?\n/)); setWizardOpen(true); } },
   };
   // Dynamic Sidebar Width (Controlled by children like CamPanel)
   const [sidebarWidth, setSidebarWidth] = useState(400);
@@ -308,7 +311,7 @@ function App() {
   const renderSidePane = () => {
     switch (activeTab) {
       case 'connection':
-        return <ConnectionPanel status={status} onConnect={handleConnect} onDisconnect={handleDisconnect} />;
+        return <ConnectionPanel status={status} onConnect={handleConnect} onDisconnect={handleDisconnect} onMachineChanged={fetchStatus} />;
       case 'jog':
         return (
           <div className="space-y-6">
@@ -329,12 +332,11 @@ function App() {
           objects={objects}
           setObjects={setObjects}
           setSidebarWidth={setSidebarWidth}
-          machineSettings={draftSettings || status.machineSettings}
+          machineSettings={shownSettings}
           maxS={maxS}
           mill={millController}
           activeTab={camTab}
           onTabChange={setCamTab}
-          onCommand={handleCommand}
         />;
       case 'gcode': {
         const b = parsedJob.cutBounds;
@@ -374,6 +376,7 @@ function App() {
           laserBeamEnabled={laserBeamEnabled}
           setLaserBeamEnabled={setLaserBeamEnabled}
           onSettingsChange={setDraftSettings}
+          onMachinesChanged={fetchStatus}
         />;
       default:
         return null;
@@ -386,8 +389,6 @@ function App() {
 
   return (
     <div className="flex h-screen bg-[#0f172a] text-gray-200 overflow-hidden relative">
-      {laserBeamEnabled && <BackgroundFX />}
-
       <Sidebar
         activeTab={activeTab}
         onTabChange={setActiveTab}
@@ -434,7 +435,7 @@ function App() {
             progressLine={progressLine}
             spindle={status.spindle}
             laserBeamEnabled={laserBeamEnabled}
-            machineSettings={draftSettings || status.machineSettings}
+            machineSettings={shownSettings}
             objects={objects}
             onSelectObject={(id) => setObjects(prev => prev.map(o => ({ ...o, selected: o.id === id })))}
             onObjectUpdate={(id, updates) => setObjects(objs => objs.map(o => o.id === id ? { ...o, ...updates } : o))}
@@ -454,10 +455,23 @@ function App() {
           />
         )}
 
+        {/* Brand logo (top centre, clear of the view buttons and status pill) */}
+        <div className="absolute top-2.5 left-1/2 -translate-x-1/2 pointer-events-none hidden lg:block z-10">
+          <BrandLogo />
+        </div>
+
         {/* Top status bar */}
         <div className="absolute top-3 right-3 flex items-center gap-2 pointer-events-none">
           <div className="glass-panel px-3 py-1.5 flex items-center gap-3 pointer-events-auto">
-            <span className="font-bold tracking-[0.2em] text-sm text-cyan-300">LZR<span className="text-slate-200">CNC</span></span>
+            <LogoMark size={18} glow={false} className="lg:hidden" />
+            {status.activeMachine && (
+              <span className="text-xs text-slate-300 max-w-[14rem] truncate" title="Active machine profile (Settings › Machines)">
+                {status.activeMachine.name}
+              </span>
+            )}
+            {status.connectionType === 'mock' && status.state !== 'Disconnected' && (
+              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded border text-violet-300 bg-violet-500/10 border-violet-500/30" title="Simulated machine, no hardware">SIM</span>
+            )}
             <span className={`flex items-center gap-1.5 text-xs font-mono font-bold px-2 py-0.5 rounded border ${STATE_STYLE[status.state] ?? STATE_STYLE.Idle}`}>
               <Activity size={12} /> {status.state}
             </span>
@@ -505,7 +519,7 @@ function App() {
         onExecute={executeJob}
         status={status}
         gcodeData={gcode}
-        machineSettings={draftSettings || status.machineSettings}
+        machineSettings={shownSettings}
         onCommand={handleCommand}
         onFrame={handleFrame}
         mill={gcodeIsMill ? { stock: millStock, zZero: gcodeTopZ > 0 ? 'bottom' : 'top' } : null}

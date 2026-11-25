@@ -44,3 +44,31 @@ export async function apiPost<T = unknown>(path: string, body?: unknown, method:
     });
     return parse<T>(res);
 }
+
+/** Normalise a user-typed LzrCnc address ("192.168.1.20:3001" → "http://192.168.1.20:3001"). */
+export function normalizeServerUrl(input: string): string {
+    let url = input.trim().replace(/\/+$/, '');
+    if (!url) return '';
+    if (!/^https?:\/\//i.test(url)) url = `http://${url}`;
+    return url;
+}
+
+/** POST JSON to another LzrCnc server (e.g. the Raspberry Pi). The server allows any CORS origin. */
+export async function remotePost<T = unknown>(baseUrl: string, path: string, body: unknown, timeoutMs = 8000): Promise<T> {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    try {
+        const res = await fetch(`${normalizeServerUrl(baseUrl)}${path}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+            signal: ctrl.signal,
+        });
+        return await parse<T>(res);
+    } catch (e) {
+        if (e instanceof ApiError) throw e;
+        throw new ApiError(0, `Cannot reach ${normalizeServerUrl(baseUrl)} (is LzrCnc running there, and is port 3001 allowed by its firewall?)`);
+    } finally {
+        clearTimeout(timer);
+    }
+}

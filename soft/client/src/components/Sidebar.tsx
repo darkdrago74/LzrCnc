@@ -1,4 +1,5 @@
 import { Zap, Grid, Terminal, Settings, FolderOpen, Move } from 'lucide-react';
+import { LogoMark } from './Logo';
 
 interface SidebarProps {
     activeTab: string | null;
@@ -21,8 +22,8 @@ export function Sidebar({ activeTab, onTabChange, connectionState }: SidebarProp
     return (
         <div className="w-[var(--sidebar-width)] bg-[var(--bg-color)] border-r border-[var(--panel-border)] flex flex-col items-center py-4 z-50">
             {/* Logo Area */}
-            <div className="mb-8 p-2 bg-[var(--accent-color)] rounded-lg shadow-lg shadow-[rgba(6,182,212,0.4)]">
-                <Zap className="text-white" size={20} fill="currentColor" />
+            <div className="mb-8 p-1.5 rounded-xl bg-slate-900 border border-cyan-500/30 shadow-lg shadow-[rgba(6,182,212,0.25)]" title="LzrCnc">
+                <LogoMark size={30} />
             </div>
 
             {/* Nav Items */}

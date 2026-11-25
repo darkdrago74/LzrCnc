@@ -3,9 +3,11 @@
  * review warnings, simulate material removal.
  */
 import React, { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, ChevronDown, ChevronUp, Copy, Eye, EyeOff, Info, Layers, Pause, Play, Plus, Trash2, XCircle, Drill, Box } from 'lucide-react';
+import { AlertTriangle, ChevronDown, ChevronUp, Copy, Eye, EyeOff, Info, Layers, Pause, Play, Plus, Trash2, XCircle, Drill, Box, Wrench } from 'lucide-react';
 import { apiGet } from '../../api';
 import { HelpIcon } from '../ui/Tooltip';
+import { ToolManager } from '../cnc/ToolManager';
+import { MillMachineSetup } from '../cnc/MillMachineSetup';
 import {
     DEFAULT_TOOL, MATERIALS, chipLoad, defaultMillOp, opDepth, suggestFeeds,
     type MillContour, type MillOp, type MillOpType, type MillResult, type MillStock, type MillTool, type CutSide,
@@ -35,6 +37,8 @@ export interface MillController {
     machineReady?: boolean;
     machineState?: string;
     sendCommands?: (cmds: string[]) => Promise<void>;
+    /** Loads the computed program as the current job and opens the run wizard. */
+    runJob?: () => void;
 }
 
 const num = (v: string, fallback = 0) => { const n = parseFloat(v); return Number.isFinite(n) ? n : fallback; };
@@ -44,8 +48,8 @@ const Field: React.FC<{ label: string; unit?: string; help?: string; value: numb
         <span className="text-gray-500 text-[10px] uppercase font-bold mb-1 flex items-center gap-1">{label}{help && <HelpIcon text={help} />}</span>
         <span className="relative block">
             <input type="number" step={step} min={min} value={Number.isFinite(value) ? value : ''} onChange={e => onChange(num(e.target.value, value))}
-                className={`w-full bg-black/50 border rounded-lg px-2 py-1.5 text-white text-xs font-mono focus:outline-none pr-12 ${warn ? 'border-amber-500/70' : 'border-white/10 focus:border-emerald-500/50'}`} />
-            {unit && <span className="absolute right-2 top-1.5 text-gray-600 text-[10px] pointer-events-none">{unit}</span>}
+                className={`w-full bg-black/50 border rounded-lg px-2 py-1.5 text-white text-xs font-mono focus:outline-none ${unit && unit.length > 3 ? 'pr-12' : unit ? 'pr-7' : ''} ${warn ? 'border-amber-500/70' : 'border-white/10 focus:border-emerald-500/50'}`} />
+            {unit && <span className="absolute right-1.5 top-1.5 text-gray-600 text-[10px] pointer-events-none">{unit}</span>}
         </span>
     </label>
 );
@@ -68,10 +72,11 @@ const TYPE_INFO: Record<MillOpType, { label: string; badge: string; help: string
 
 const SIDE_LABEL: Record<CutSide, string> = { outside: 'Outside', inside: 'Inside', on: 'On line' };
 
-export const MillPanel: React.FC<{ mill: MillController; onOpenTools?: () => void }> = ({ mill, onOpenTools }) => {
+export const MillPanel: React.FC<{ mill: MillController }> = ({ mill }) => {
     const { stock, setStock, ops, setOps, contours, selectedContourIds, setSelectedContourIds, result } = mill;
     const [tools, setTools] = useState<(MillTool & { id: string })[]>([]);
     const [toolId, setToolId] = useState<string>('');
+    const [showLibrary, setShowLibrary] = useState(false);
     const [editId, setEditId] = useState<string | null>(ops[0]?.id ?? null);
     const [playing, setPlaying] = useState(false);
     const progressRef = React.useRef(mill.simProgress);
@@ -88,17 +93,19 @@ export const MillPanel: React.FC<{ mill: MillController; onOpenTools?: () => voi
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [playing, mill.simEnabled]);
 
-    useEffect(() => {
+    const loadTools = () => {
         apiGet<(MillTool & { id: string })[]>('/api/tools').then(t => {
             const list = Array.isArray(t) ? t.filter(x => x && x.diameter > 0) : [];
             setTools(list);
-            if (list.length && !toolId) {
+            setToolId(cur => {
+                if (cur && list.some(x => x.id === cur)) return cur;
+                if (!list.length) return '';
                 const flats = list.filter(x => x.type === 'endmill').sort((a, b) => Math.abs(a.diameter - 6) - Math.abs(b.diameter - 6));
-                setToolId((flats[0] ?? list[0]).id);
-            }
+                return (flats[0] ?? list[0]).id;
+            });
         }).catch(() => setTools([]));
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
+    };
+    useEffect(loadTools, []);
 
     const currentTool: MillTool = tools.find(t => t.id === toolId) ?? DEFAULT_TOOL;
     const editing = ops.find(o => o.id === editId) ?? null;
@@ -216,7 +223,11 @@ export const MillPanel: React.FC<{ mill: MillController; onOpenTools?: () => voi
                 )}
             </Card>
 
-            <Card title="3 · Tool & operations" right={onOpenTools && <button className="text-[10px] text-gray-400 hover:text-white" onClick={onOpenTools}>Tool library →</button>}>
+            <Card title="3 · Tool & operations" right={
+                <button className={`text-[10px] flex items-center gap-1 ${showLibrary ? 'text-emerald-300' : 'text-gray-400 hover:text-white'}`} onClick={() => setShowLibrary(v => !v)}>
+                    <Wrench size={11} /> Tool library {showLibrary ? '▴' : '▾'}
+                </button>}>
+                {showLibrary && <div className="mb-3"><ToolManager onChange={loadTools} /></div>}
                 <div className="flex items-center gap-2 mb-3">
                     <span className="text-gray-500 text-[10px] uppercase font-bold">Tool</span>
                     <select value={toolId} onChange={e => setToolId(e.target.value)} className="flex-1 bg-black/50 border border-white/10 rounded-lg px-2 py-1 text-xs text-white">
@@ -315,6 +326,17 @@ export const MillPanel: React.FC<{ mill: MillController; onOpenTools?: () => voi
             </Card>
 
             <ShowOnMachine mill={mill} />
+
+            <Card title="6 · Zero, spindle & run" color="text-rose-400"
+                right={<HelpIcon text="Set the work zero (Z0) and optionally control the spindle, then open the run wizard (home, position, frame, safety check, start)." />}>
+                <MillMachineSetup send={mill.sendCommands} ready={!!mill.machineReady} zZero={stock.zZero === 'bottom' ? 'bottom' : 'top'} />
+                <button onClick={mill.runJob} disabled={!mill.runJob || !result?.gcode || errors > 0 || !mill.machineReady}
+                    className="mt-3 w-full py-3 rounded-lg border text-sm font-bold flex items-center justify-center gap-2 bg-rose-600/50 hover:bg-rose-600/70 border-rose-500/50 text-white disabled:opacity-40 disabled:cursor-not-allowed"
+                    title={!result?.gcode ? 'Compute toolpaths first (step 4)' : errors > 0 ? 'Fix the errors first' : !mill.machineReady ? 'Connect the machine (or the simulator); it must be Idle' : 'Open the run wizard'}>
+                    <Play size={15} /> Run milling job…
+                </button>
+                {!mill.machineReady && <p className="text-[10px] text-amber-300 mt-2">Connect the machine (state must be Idle). Now: {mill.machineState ?? 'unknown'}.</p>}
+            </Card>
         </div>
     );
 };

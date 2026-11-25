@@ -1,7 +1,6 @@
 import React, { useState, useRef, Suspense, useEffect, useMemo } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { OrbitControls, TransformControls, GizmoHelper, GizmoViewport } from '@react-three/drei';
-import { EffectComposer, Bloom } from '@react-three/postprocessing';
 import * as THREE from 'three';
 import MachineBed from './MachineBed';
 import MachineHead from './MachineHead';
@@ -188,22 +187,19 @@ const VisualizerScene: React.FC<VisualizerSceneProps> = ({
                 <directionalLight position={[bed.centerX + 200, bed.centerY - 300, 600]} intensity={1.1} castShadow />
 
                 {laserBeamEnabled && (
-                    <>
-                        <EffectComposer enableNormalPass={false}>
-                            <Bloom luminanceThreshold={1} mipmapBlur intensity={1.2} radius={0.6} />
-                        </EffectComposer>
-                        {/* BackgroundLaser is authored Y-up; this wrapper maps its local +Y onto machine +Z */}
-                        <group rotation={[Math.PI / 2, 0, 0]}>
-                            <group position={[bed.centerX, 1000, -bed.centerY - 1000]}>
-                                <BackgroundLaser delay={0} spawnMode="vertical" height={6000} xRange={1000} zRange={100} particleSize={9} />
-                                <BackgroundLaser delay={3.5} spawnMode="vertical" height={6000} xRange={1000} zRange={100} particleSize={9} />
-                            </group>
-                            <group position={[bed.centerX, -20, -bed.centerY]}>
-                                <BackgroundLaser delay={1.5} spawnMode="flat" xRange={bed.width} zRange={bed.height} />
-                                <BackgroundLaser delay={5.0} spawnMode="flat" xRange={bed.width} zRange={bed.height} />
-                            </group>
+                    /* Decorative beams (no post-processing). BackgroundLaser is authored Y-up; this wrapper maps its local +Y onto machine +Z */
+                    <group rotation={[Math.PI / 2, 0, 0]}>
+                        <group position={[bed.centerX, 300, -bed.centerY - 1000]}>
+                            {[1, 4.5, 8, 11.5].map(d => (
+                                <BackgroundLaser key={d} delay={d} spawnMode="vertical" height={6000} xRange={1000} zRange={100} particleSize={22} />
+                            ))}
                         </group>
-                    </>
+                        <group position={[bed.centerX, -20, -bed.centerY]}>
+                            {[3, 9.5].map(d => (
+                                <BackgroundLaser key={d} delay={d} spawnMode="flat" height={6000} xRange={bed.width} zRange={bed.height} particleSize={12} />
+                            ))}
+                        </group>
+                    </group>
                 )}
 
                 <MachineBed bed={bed} visible={machineSettings?.workbench?.showWorkbench !== false} />

@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react';
-import { apiUrl } from '../api';
+import { apiUrl, apiGet, apiPost } from '../api';
 import { Save, Upload, Download, RefreshCw, LayoutTemplate, Box, ArrowLeftRight, Eye, Unlock, Settings as SettingsIcon } from 'lucide-react';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls, PerspectiveCamera, Html } from '@react-three/drei';
 import * as THREE from 'three';
-import type { MachineSettings, AxisSettings, WorkbenchSettings } from '../types';
+import type { MachineSettings, AxisSettings, WorkbenchSettings, MachineStore, MachineProfile } from '../types';
+import MachineProfilesSection, { type ProfileMeta } from './MachineProfilesSection';
 
 // ... (keep MoveIcon)
 
@@ -276,14 +277,21 @@ interface MachineSettingsPanelProps {
     status: any; // Using any for status to avoid circular dependency or complex type import for now
     laserBeamEnabled: boolean;
     setLaserBeamEnabled: (enabled: boolean) => void;
-    onSettingsChange?: (settings: MachineSettings) => void;
+    /** Live preview of unsaved edits (null when the edited profile is not the active one) */
+    onSettingsChange?: (settings: MachineSettings | null) => void;
+    /** Called after profiles were saved / switched so the app refreshes status */
+    onMachinesChanged?: () => void;
 }
 
 
-export default function MachineSettingsPanel({ status, laserBeamEnabled, setLaserBeamEnabled, onSettingsChange }: MachineSettingsPanelProps) {
+export default function MachineSettingsPanel({ status, laserBeamEnabled, setLaserBeamEnabled, onSettingsChange, onMachinesChanged }: MachineSettingsPanelProps) {
     const [settings, setSettings] = useState<MachineSettings | null>(null);
     const [loading, setLoading] = useState(false);
     const [saving, setSaving] = useState(false);
+    const [store, setStore] = useState<MachineStore | null>(null);
+    const [editId, setEditId] = useState('');
+    const [meta, setMeta] = useState<ProfileMeta>({ name: '', kind: 'laser', notes: '', spindleMax: 1000 });
+    const [savedSnapshot, setSavedSnapshot] = useState('');
     const [activeTab, setActiveTab] = useState<'app' | 'hardware'>('app');
 
     // Hardware Params State
@@ -301,40 +309,72 @@ export default function MachineSettingsPanel({ status, laserBeamEnabled, setLase
         }
     }, [status?.grblSettings]);
 
-    // Emit settings changes to parent for live preview
+    // Live preview in the main visualizer, only for the machine that is actually active
+    const editingActive = !!store && editId === store.activeId;
     useEffect(() => {
-        if (settings && onSettingsChange) {
-            onSettingsChange(settings);
-        }
-    }, [settings, onSettingsChange]);
+        if (!onSettingsChange) return;
+        onSettingsChange(settings && editingActive ? { ...settings, spindleMax: meta.spindleMax } : null);
+    }, [settings, meta.spindleMax, editingActive, onSettingsChange]);
+    useEffect(() => () => onSettingsChange?.(null), [onSettingsChange]);
 
-    const fetchSettings = async () => {
-        setLoading(true);
+    const snapshot = (s: MachineSettings | null, m: ProfileMeta) => JSON.stringify([s, m]);
+    const dirty = !!settings && snapshot(settings, meta) !== savedSnapshot;
+
+    const loadProfile = (p: MachineProfile) => {
+        const m: ProfileMeta = { name: p.name, kind: p.kind, notes: p.notes ?? '', spindleMax: p.settings.spindleMax ?? 1000 };
+        setEditId(p.id);
+        setSettings(p.settings);
+        setMeta(m);
+        setSavedSnapshot(snapshot(p.settings, m));
+    };
+
+    // Reload the list; keep editing the same profile unless told otherwise
+    const fetchSettings = async (selectId?: string) => {
+        setLoading(l => l || !settings);
         try {
-            const res = await fetch(apiUrl(`/api/settings/machine`));
-            const data = await res.json();
-            setSettings(data);
+            const s = await apiGet<MachineStore>('/api/machines');
+            setStore(s);
+            const want = selectId ?? editId;
+            loadProfile(s.machines.find(m => m.id === want) ?? s.machines.find(m => m.id === s.activeId) ?? s.machines[0]);
         } catch (error) {
-            console.error('Failed to fetch settings:', error);
+            console.error('Failed to fetch machines:', error);
         } finally {
             setLoading(false);
         }
     };
 
-    const handleSave = async () => {
-        if (!settings) return;
+    const selectProfile = (id: string) => {
+        if (id === editId || !store) return;
+        if (dirty && !confirm(`Discard unsaved changes to “${meta.name}”?`)) return;
+        const p = store.machines.find(m => m.id === id);
+        if (p) loadProfile(p);
+    };
+
+    const handleSave = async (): Promise<boolean> => {
+        if (!settings || !editId) return false;
         setSaving(true);
         try {
-            await fetch(apiUrl(`/api/settings/machine`), {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(settings)
-            });
+            const p = await apiPost<MachineProfile>(`/api/machines/${encodeURIComponent(editId)}`, {
+                name: meta.name,
+                kind: meta.kind,
+                notes: meta.notes,
+                settings: { ...settings, spindleMax: meta.spindleMax },
+            }, 'PUT');
+            loadProfile(p);
+            setStore(s => s && { ...s, machines: s.machines.map(m => m.id === p.id ? p : m) });
+            onMachinesChanged?.();
+            return true;
         } catch (error) {
-            console.error('Failed to save settings:', error);
+            alert(`Failed to save: ${(error as Error).message}`);
+            return false;
         } finally {
             setSaving(false);
         }
+    };
+
+    const handleStoreChanged = async (selectId?: string) => {
+        await fetchSettings(selectId ?? '');
+        onMachinesChanged?.();
     };
 
     const updateWorkbench = (key: keyof WorkbenchSettings, value: any) => {
@@ -469,14 +509,33 @@ export default function MachineSettingsPanel({ status, laserBeamEnabled, setLase
                             Machine Setup
                         </h3>
                         <button
-                            onClick={handleSave}
-                            disabled={saving}
+                            onClick={() => handleSave()}
+                            disabled={saving || !dirty}
+                            title={editingActive ? 'Save this machine' : `Save “${meta.name}” (not the active machine)`}
                             className="bg-cyan-600 hover:bg-cyan-500 text-white px-3 py-1 rounded flex items-center gap-2 disabled:opacity-50"
                         >
                             <Save size={16} />
-                            {saving ? 'Saving...' : 'Save'}
+                            {saving ? 'Saving...' : dirty ? 'Save' : 'Saved'}
                         </button>
                     </div>
+
+                    {store && (
+                        <MachineProfilesSection
+                            store={store}
+                            editId={editId}
+                            meta={meta}
+                            dirty={dirty}
+                            onMetaChange={setMeta}
+                            onSelect={selectProfile}
+                            onSave={handleSave}
+                            onStoreChanged={handleStoreChanged}
+                        />
+                    )}
+                    {!editingActive && (
+                        <p className="text-[11px] text-amber-300/80 -mt-2">
+                            Editing “{meta.name}”, which is not the active machine: the main view keeps showing the active one.
+                        </p>
+                    )}
 
                     {/* Workbench Dimensions */}
                     <section className="bg-slate-800/50 p-4 rounded-lg border border-white/10 space-y-4">

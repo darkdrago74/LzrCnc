@@ -98,7 +98,7 @@ export const JobWizardModal: React.FC<JobWizardModalProps> = ({ isOpen, onClose,
                             <input type="checkbox" className="mt-1" checked={zHere} onChange={e => setZHere(e.target.checked)} />
                             <span>Set Z0 here<span className="block text-[11px] text-gray-400">{mill.zZero === 'bottom'
                                 ? `This program uses Z0 on the stock BOTTOM: the tool tip is touching the bed / spoilboard next to the stock right now.`
-                                : `The tool tip is touching the top of the ${mill.stock.thickness} mm stock right now.`} Leave unchecked if Z0 is already set (probe / CNC tab).</span></span>
+                                : `The tool tip is touching the top of the ${mill.stock.thickness} mm stock right now.`} Leave unchecked if Z0 is already set (Mill tab, step 6).</span></span>
                         </label>
                     )}
                     <div className={`flex items-center gap-2 text-xs ${outOfBed ? 'text-amber-300' : 'text-emerald-300'}`}>

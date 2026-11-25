@@ -1,5 +1,37 @@
 # Changelog
 
+## 2.2.0 — Machine profiles
+
+### New
+- **Named machine profiles** (`data/machines.json`): several machines per LzrCnc, each with a name, type
+  (laser / mill / laser + mill), notes, max S (`$30`), connection (port/baud or Klipper host) and all settings.
+  The old `machine_settings.json` is migrated automatically to a profile called "My machine" (file left untouched).
+- **Settings → Machines**: select, rename, New, Duplicate, Delete, Set active; Save writes to the selected profile.
+  Unsaved edits are previewed in the 3D view only for the active machine and only while Settings is open.
+- **Simulate a saved machine**: Connection panel has a Machine selector and a "Simulate <name>" button; the simulator
+  uses that machine's travel limits. Jobs can be prepared offline without `npm run sim`.
+- **Export / Import** a machine as a `lzrcnc-machine` JSON file (add as new, or replace the selected machine while
+  keeping its local port), and **Send to another LzrCnc** (e.g. the Raspberry Pi) by address, updating the machine
+  with the same name there.
+- Header shows the active machine name and a SIM badge while simulating.
+- LzrCnc logo back at the top of the visualizer, redrawn as a lightweight vector (triangle "LC" mark + wordmark with
+  an animated laser line); same mark in the sidebar and as the browser icon (`logo-mark.svg`).
+- Lighter laser FX (Settings toggle): beams now appear every ~6–12 s for ~2–3 s with slow fades and a faint glow
+  halo instead of a full-screen Bloom pass; nothing is drawn between beams and React no longer re-renders per
+  phase. Sparks are 24 round, fading points per beam that drift slowly off the beam. 4 vertical + 2 full-length
+  floor beams. The hidden full-window 2D "chips" canvas (`BackgroundFX`) was removed. Honours *prefers-reduced-motion*.
+- CAM: the *CNC* tab is merged into *Mill*. Step 3 opens the tool library in place (the tool list refreshes after
+  edits); new step 6 "Zero, spindle & run" holds Z0 / touch-plate probing, the Z-direction test, the optional spindle
+  controls and a **Run milling job…** button that opens the run wizard directly.
+- API: `GET/POST /api/machines`, `PUT/DELETE /api/machines/:id`, `POST /api/machines/:id/activate`,
+  `GET /api/machines/:id/export`, `POST /api/machines/import`; `/connect` accepts `machineId`; `/status` reports
+  `activeMachine` and `connectionType`. `/api/settings/machine` still reads/writes the active machine.
+- Switching or replacing the active machine is refused (409) while real hardware is connected or a job runs.
+
+### Fixed
+- Unsaved settings edits no longer stay applied to the visualizer / job wizard after leaving the Settings panel.
+- Laser power scaling falls back to the machine's max S when the controller does not report `$30`.
+
 ## 2.1.1 — Installation & launchers (Windows, Debian / Raspberry Pi OS, Fedora)
 
 Tested end-to-end on Windows 11 (fresh copy), Fedora 44 and Debian 13 (WSL, with systemd).
@@ -14,6 +46,9 @@ Tested end-to-end on Windows 11 (fresh copy), Fedora 44 and Debian 13 (WSL, with
   by a new `.gitattributes` (Windows line endings broke every `.sh` on Linux).
 - Port clean-up only stops old LzrCnc (node) processes; it no longer kills whatever program holds the port.
 - `validate.sh` checked port 3000 and the wrong start command; `soft/package.json` `install:all` pointed to a missing file.
+- Missing files under `/assets/` returned `index.html` (served as JavaScript), which left a blank page; they now return 404.
+- If the app cannot start (blocked or missing script, startup error), the page now shows the reason instead of an empty dark screen.
+- `start.bat` opens `http://127.0.0.1:3001` instead of `localhost`: enterprise Edge policies can force `localhost` into Internet Explorer mode (blank page). The page detects IE mode and gives the right address.
 
 ### New
 - **`lzrcnc.sh`** (Linux) and **`start.bat`** (Windows) launchers with the same commands: `start` (default),
@@ -25,6 +60,7 @@ Tested end-to-end on Windows 11 (fresh copy), Fedora 44 and Debian 13 (WSL, with
 - `uninstall.sh` no longer removes system packages; `--all` deletes the user data instead (with confirmation).
 - `npm run build:fast --workspace=client` (Vite only, no type-check) used by the launchers - lighter on a Raspberry Pi.
 - Screenshots in `docs/screenshots/`, README rewritten for Windows / Raspberry Pi / Fedora.
+- The server prints its network address(es) at start-up, e.g. `Network : http://192.168.1.20:3001`, to open it from a phone or tablet.
 
 ## 2.1.0 — Laser designer & mill setup
 
